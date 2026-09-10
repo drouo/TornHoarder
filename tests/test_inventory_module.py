@@ -4,9 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from tma.http_client import cooldown_seconds
 from tma.inventory import (
     InventoryEntry,
-    _cooldown_seconds,
     _dedupe,
     _has_more,
     _parse_page,
@@ -77,13 +77,13 @@ class DedupeTest(unittest.TestCase):
 
 class CooldownTest(unittest.TestCase):
     def test_parses_reset(self):
-        self.assertEqual(_cooldown_seconds("Too many calls. Resets at 0:00:20", default=99), 21.0)
+        self.assertEqual(cooldown_seconds("Too many calls. Resets at 0:00:20", default=99), 21.0)
 
     def test_capped_at_60(self):
-        self.assertEqual(_cooldown_seconds("Too many calls. Resets at 5:00:00", default=99), 60.0)
+        self.assertEqual(cooldown_seconds("Too many calls. Resets at 5:00:00", default=99), 60.0)
 
     def test_default(self):
-        self.assertEqual(_cooldown_seconds(None, default=7), 7.0)
+        self.assertEqual(cooldown_seconds(None, default=7), 7.0)
 
 
 if __name__ == "__main__":

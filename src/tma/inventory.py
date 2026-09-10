@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -8,7 +7,7 @@ from typing import Callable, Optional
 import pandas as pd
 import requests
 
-BASE_URL = "https://api.torn.com/v2"
+from .http_client import BASE_URL, envelope, get_json_with_retry
 
 CAT_TIMEOUT_S = 120.0
 
@@ -63,27 +62,23 @@ class InventoryResult:
     errors: list[str]
 
 
-def _auth_headers(api_key: str) -> dict[str, str]:
-    return {"Authorization": f"ApiKey {api_key}"}
-
-
 def fetch_item_stats(
     session: requests.Session,
     api_key: str,
     uid: int | str,
     bucket_take: Optional[Callable[[int], None]] = None,
 ) -> Optional[dict]:
-    if bucket_take:
-        bucket_take(1)
-    resp = session.get(
-        f"{BASE_URL}/torn/{uid}",
-        headers=_auth_headers(api_key),
+    data, err = get_json_with_retry(
+        session,
+        bucket=None,
+        url=f"{BASE_URL}/torn/{uid}",
+        api_key=api_key,
         params={"selections": "itemdetails"},
         timeout=20,
+        retries=1,
+        bucket_take=bucket_take,
     )
-    data = resp.json()
-    err = _api_error(data)
-    if err is not None:
+    if err is not None or data is None:
         return None
     details = (data.get("itemdetails") or {}).get("stats") or {}
     stats = {
@@ -127,24 +122,8 @@ def fetch_item_stats_many(
     return stats_by_uid, errors[:5]
 
 
-def _envelope(data: dict) -> dict:
-    d = data.get("data")
-    if isinstance(d, dict):
-        return d
-    return data
-
-
-def _api_error(data: dict) -> Optional[str]:
-    err = data.get("error") or data.get("apiError")
-    if isinstance(err, dict):
-        return f"{err.get('code')} {err.get('error')}".strip()
-    if err:
-        return str(err)
-    return None
-
-
 def _parse_page(data: dict, category: Optional[str]) -> list[InventoryEntry]:
-    d = _envelope(data)
+    d = envelope(data)
     inventory = d.get("inventory") or []
     if isinstance(inventory, dict):
         inventory = inventory.get("items") or []
@@ -177,7 +156,7 @@ def _parse_page(data: dict, category: Optional[str]) -> list[InventoryEntry]:
 
 def _has_more(data: dict, offset: int, page_len: int) -> bool:
     meta = {}
-    d = _envelope(data)
+    d = envelope(data)
     meta.update(d.get("_metadata") or {})
     meta.update(data.get("_metadata") or {})
     if "total" in meta:
@@ -188,16 +167,6 @@ def _has_more(data: dict, offset: int, page_len: int) -> bool:
     if "more" in meta:
         return bool(meta["more"])
     return page_len >= 100
-
-
-def _cooldown_seconds(msg: Optional[str], default: float = 15.0) -> float:
-    if not msg:
-        return default
-    m = re.search(r"resets?\s+at\s+(\d{1,2}):(\d{2}):(\d{2})", msg, re.IGNORECASE)
-    if not m:
-        return default
-    hh, mm, ss = (int(g) for g in m.groups())
-    return float(min(hh * 3600 + mm * 60 + ss + 1, 60))
 
 
 def _fetch_category(
@@ -220,41 +189,17 @@ def _fetch_category(
         if category:
             params["cat"] = category
 
-        data = None
-        for attempt in range(3):
-            if bucket_take:
-                bucket_take(1)
-            resp = session.get(
-                f"{BASE_URL}/user/inventory",
-                headers=_auth_headers(api_key),
-                params=params,
-                timeout=20,
-            )
-
-            try:
-                data = resp.json()
-            except ValueError:
-                if attempt < 2:
-                    time.sleep(1.5)
-                    continue
-                errors.append(f"{category or 'all'} / offset {offset}: non-JSON response")
-                data = None
-                break
-
-            err = _api_error(data)
-            if err is not None and (resp.status_code == 429 or "too many" in err.lower()):
-                if attempt < 2:
-                    time.sleep(_cooldown_seconds(err))
-                    continue
-                errors.append(f"{category or 'all'} / offset {offset}: {err}")
-                return entries, errors
-            break
-
+        data, err = get_json_with_retry(
+            session,
+            bucket=None,
+            url=f"{BASE_URL}/user/inventory",
+            api_key=api_key,
+            params=params,
+            timeout=20,
+            retries=3,
+            bucket_take=bucket_take,
+        )
         if data is None:
-            return entries, errors
-
-        err = _api_error(data)
-        if err is not None:
             errors.append(f"{category or 'all'} / offset {offset}: {err}")
             return entries, errors
 

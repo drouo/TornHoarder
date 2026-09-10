@@ -33,6 +33,9 @@ def tier_style(v):
     return f"background-color: {color}; font-weight: 600;"
 
 
+_LIST_EDITOR_KEY = "list_editor"
+
+
 def render_warnings_banner(warnings: list[dict]) -> None:
     elevated = [w for w in warnings if w["elevated"]]
     moderate = [w for w in warnings if not w["elevated"]]
@@ -225,7 +228,7 @@ def render_pricing_table(an: dict) -> dict:
         styled,
         width="stretch",
         hide_index=True,
-        key="list_editor",
+        key=_LIST_EDITOR_KEY,
         column_config=column_config,
     )
 

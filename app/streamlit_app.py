@@ -100,14 +100,18 @@ in ~2 calls. Add the `uid` of one of your own weapon/armor copies to
 price *that exact copy* with its real stats instead of market medians.
 
 Each run updates a step tracker (pull items → read copy stats → market
-listings → suggested prices) from start to finish, and once you install
-the current autofill script it keeps itself updated from
-`http://localhost:9999`.
+listings → suggested prices) from start to finish.
 
-Once you've run an analysis you can download a **Torn autofill script**
-(`.user.js`) — install it once in Tampermonkey and the Torn Add Listing
-page fills its own prices, adds a premium for high-quality weapons/armor,
-and highlights them.
+Once you've run an analysis, the **Autofill script** tab has a link that
+installs the **Torn autofill script** straight into Tampermonkey — no
+download, no manual reinstall. Click it once to install; after every later
+run, click it again and Tampermonkey shows an instant update prompt with
+the new prices. On the Add Listing page it fills each row's price, adds a
+premium for high-quality weapons/armor, and highlights them.
+
+For a pile of ordinary items you just want off your hands, use the
+**Bulk sell** tab — pick a discount (e.g. 75% of Fair price), uncheck
+anything you'd rather keep at full price, and copy the listing text.
 
 ### What the app does
 

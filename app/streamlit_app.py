@@ -1,19 +1,22 @@
 import sys
 import time
-import threading
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import requests
 import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from app.paths import DICT_PATH, PROFILES_PATH
+from app.ui.results import render_results
 from tma.config import load_api_key, save_api_key, clear_api_key
+from tma.http_client import TokenBucket, session_for_requests
 from tma.inventory import (
     fetch_inventory,
     fetch_item_stats,
@@ -24,184 +27,13 @@ from tma.inventory import (
     CATEGORY_LABELS,
 )
 from tma.inventory_matcher import load_dictionary, match_inventory
-from tma.market_enrichment import (
-    wide_to_long,
-    enrich_all_items,
-    build_summary_from_enriched,
-    price_at_quality,
-    quality_from_stats,
-)
+from tma.market_enrichment import wide_to_long, enrich_all_items, build_summary_from_enriched
+from tma.market_fetch import fetch_all_item_markets
 from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
-from tma.quality import base_stats_map, PREMIUM_THRESHOLD
-from tma.userscript import build_userscript
 
-BASE_URL = "https://api.torn.com/v2"
 MAX_WORKERS = 5
 RATE_LIMIT_PER_MIN = 90
-RETRIES = 3
-TIMEOUT = 15
 MARKET_PHASE_TIMEOUT_S = 1200.0
-
-DICT_PATH = (ROOT_DIR / "data" / "torn_item_dictionary.csv").resolve()
-PROFILES_PATH = (ROOT_DIR / "data" / "torn_item_profiles.json").resolve()
-
-
-class TokenBucket:
-    def __init__(self, rate_per_min: int, capacity: int | None = None) -> None:
-        self.rate_per_sec = rate_per_min / 60.0
-        self.capacity = capacity or rate_per_min
-        self.tokens = float(self.capacity)
-        self.last = time.perf_counter()
-        self.lock = threading.Lock()
-
-    def take(self, tokens: int = 1) -> None:
-        while True:
-            with self.lock:
-                now = time.perf_counter()
-                self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate_per_sec)
-                self.last = now
-                if self.tokens >= tokens:
-                    self.tokens -= tokens
-                    return
-            time.sleep(0.01)
-
-
-def session_for_requests() -> requests.Session:
-    session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        pool_connections=MAX_WORKERS * 10,
-        pool_maxsize=MAX_WORKERS * 10,
-    )
-    session.mount("https://", adapter)
-    session.headers.update(
-        {
-            "accept": "application/json",
-            "User-Agent": "torn-itemmarket-web/1.1",
-        }
-    )
-    return session
-
-
-def attempt_call(
-    session: requests.Session,
-    bucket: TokenBucket,
-    api_key: str,
-    item_id: int,
-    mode: int,
-) -> tuple[int | None, dict]:
-    url = f"{BASE_URL}/market/{item_id}/itemmarket"
-    headers: dict[str, str] = {}
-    params: dict[str, int | str] = {"limit": 100, "offset": 0}
-
-    if mode == 1:
-        headers["Authorization"] = f"Apikey {api_key}"
-    elif mode == 2:
-        headers["Authorization"] = f"ApiKey {api_key}"
-    else:
-        params["key"] = api_key
-
-    bucket.take(1)
-    resp = session.get(url, headers=headers, params=params, timeout=TIMEOUT)
-    return resp.status_code, resp.json()
-
-
-def _cooldown_seconds(msg) -> float:
-    import re as _re
-
-    if not msg:
-        return 15.0
-    m = _re.search(r"resets?\s+at\s+(\d{1,2}):(\d{2}):(\d{2})", str(msg), _re.IGNORECASE)
-    if not m:
-        return 15.0
-    hh, mm, ss = (int(g) for g in m.groups())
-    return float(min(hh * 3600 + mm * 60 + ss + 1, 60))
-
-
-def fetch_100(
-    session: requests.Session,
-    bucket: TokenBucket,
-    api_key: str,
-    item_id: int,
-    my_quantity: int,
-) -> dict:
-    backoff = 0.8
-
-    for _ in range(1, RETRIES + 1):
-        for mode in (1, 2, 3):
-            try:
-                status, data = attempt_call(session, bucket, api_key, item_id, mode)
-            except Exception as exc:
-                status, data = None, {"error": {"code": -1, "error": str(exc)}}
-
-            if isinstance(data, dict) and "error" in data:
-                code = data["error"].get("code")
-                msg = data["error"].get("error")
-
-                if code == 2 and mode != 3:
-                    continue
-
-                if status == 429 or (code == 0 and "too many" in (msg or "").lower()):
-                    time.sleep(_cooldown_seconds(msg))
-                    break
-
-                if code in (0, 10) or status in (500, 502, 503, 504):
-                    time.sleep(backoff)
-                    backoff *= 1.6
-                    break
-
-                return {
-                    "item_id": item_id,
-                    "my_quantity": my_quantity,
-                    "error": f"API error {code}: {msg}",
-                }
-
-            itemmarket = (data or {}).get("itemmarket", {}) or {}
-            item = itemmarket.get("item", {}) or {}
-            listings = itemmarket.get("listings", []) or []
-
-            n = min(len(listings), 100)
-
-            row: dict[str, object] = {
-                "item_id": item.get("id", item_id),
-                "item_name": item.get("name"),
-                "item_type": item.get("type"),
-                "average_price": item.get("average_price"),
-                "my_quantity": my_quantity,
-            }
-
-            for i, listing in enumerate(listings[:n], start=1):
-                row[f"price_{i}"] = listing.get("price")
-                row[f"amount_{i}"] = listing.get("amount")
-                details = listing.get("item_details") or {}
-                stats = details.get("stats") or {}
-                row[f"quality_{i}"] = stats.get("quality")
-                row[f"damage_{i}"] = stats.get("damage")
-                row[f"accuracy_{i}"] = stats.get("accuracy")
-                row[f"armor_{i}"] = stats.get("armor")
-
-            for i in range(n + 1, 101):
-                row[f"price_{i}"] = None
-                row[f"amount_{i}"] = None
-                row[f"quality_{i}"] = None
-                row[f"damage_{i}"] = None
-                row[f"accuracy_{i}"] = None
-                row[f"armor_{i}"] = None
-
-            return row
-
-        time.sleep(backoff)
-        backoff *= 1.6
-
-    return {"item_id": item_id, "my_quantity": my_quantity, "error": "Exhausted retries"}
-
-
-def fmt_int(x) -> str:
-    if pd.isna(x):
-        return ""
-    try:
-        return f"{int(x):,}"
-    except Exception:
-        return str(x)
 
 
 @st.cache_data
@@ -210,485 +42,6 @@ def load_stat_layer() -> tuple[dict, StatValueModel]:
     model = StatValueModel()
     model.fit(profiles)
     return profiles, model
-
-
-ADD_LISTING_URL = "https://www.torn.com/page.php?sid=ItemMarket#/addListing"
-
-TIER_COLORS = {
-    "Common": "#e3e3e3",
-    "Solid": "#c8e6c9",
-    "Premium": "#bbdefb",
-    "Rare": "#e1bee7",
-    "Elite": "#ffd97a",
-}
-
-LIST_BASIS_OPTIONS = ("Fast-sell price", "Fair price", "Greedy price")
-
-
-def tier_style(v):
-    color = TIER_COLORS.get(v)
-    if not color:
-        return ""
-    return f"background-color: {color}; font-weight: 600;"
-
-
-def render_results(an: dict) -> None:
-    df_summary = an["df_summary"]
-    warnings = an["warnings"]
-
-    st.subheader("Price overview")
-
-    elevated = [w for w in warnings if w["elevated"]]
-    moderate = [w for w in warnings if not w["elevated"]]
-
-    def _banner_lines(items):
-        return "\n".join(
-            f"- **{w['item_name']}** (x{fmt_int(w['my_quantity'])}): "
-            f"order-book median {fmt_int(w['fair_price'])} vs Torn reference "
-            f"{fmt_int(w['market_price'])} ({w['ratio']:.1f}-times above)"
-            for w in items
-        )
-
-    if elevated:
-        st.error(
-            "HIGH-VALUE stat items priced well below market reference — verify before listing:\n"
-            + _banner_lines(elevated)
-        )
-    if moderate:
-        st.warning("Some items are priced below Torn's market reference:\n" + _banner_lines(moderate))
-
-    strategy = st.radio(
-        "List price basis",
-        LIST_BASIS_OPTIONS,
-        index=0,
-        horizontal=True,
-        key="list_strategy",
-        help="Weapon/armor copies are priced on the market's own quality curve from each copy's stats; other items use this basis for the pre-filled price.",
-    )
-
-    strategy_key = {"Fast-sell price": "fast", "Fair price": "fair", "Greedy price": "greedy"}[strategy]
-    strategy_col = {"Fast-sell price": "fast_sell_price", "Fair price": "fair_price", "Greedy price": "greedy_price"}[strategy]
-
-    auto_stat = st.checkbox(
-        "Price weapon/armor copies from their stats",
-        value=True,
-        key="auto_stat_pricing",
-        help="Each copy's Damage/Accuracy (weapons) or Armor value is mapped onto the market's price-vs-quality curve. "
-        "Uncheck to use the typed 'List price' values verbatim.",
-    )
-
-    entries = an.get("entries")
-    uid_stats = an.get("uid_stats") or {}
-    payload_by_item: dict[int, dict] = {}
-    for _, r in df_summary.iterrows():
-        ptool = r.get("copy_tool")
-        if isinstance(ptool, dict):
-            payload_by_item[int(r["item_id"])] = ptool
-
-    def _stat_suggestion(payload, quality):
-        cur = price_at_quality(payload, quality)
-        if not cur["derived"]:
-            return None, None, None, None
-        return cur["fast"], cur["fair"], cur["greedy"], cur
-
-    def _copy_stats(payload, copy):
-        median = payload.get("median_stats") or {}
-        real = uid_stats.get(str(copy.uid), {}) if copy and copy.uid else {}
-        if "quality" not in (real or {}):
-            real = {}
-        stats = {
-            "damage": real.get("damage") if real.get("damage") is not None else median.get("damage"),
-            "accuracy": real.get("accuracy") if real.get("accuracy") is not None else median.get("accuracy"),
-            "armor": real.get("armor") if real.get("armor") is not None else median.get("armor"),
-        }
-        is_weapon = payload.get("stat_type") == "Weapon"
-        return {
-            "stats": {
-                "damage": stats["damage"] if is_weapon else None,
-                "accuracy": stats["accuracy"] if is_weapon else None,
-                "armor": stats["armor"] if not is_weapon else None,
-            },
-            "quality": real.get("quality") if real.get("quality") is not None else None,
-        }
-
-    rows_out: list[dict] = []
-    real_q_by_idx: dict[int, float] = {}
-    for _, r in df_summary.iterrows():
-        iid = int(r["item_id"])
-        payload = payload_by_item.get(iid) or {}
-        stat_type = payload.get("stat_type")
-        market_link = "https://www.torn.com/page.php?sid=ItemMarket#/addListing"
-        points = payload.get("points") or []
-
-        copies = [e for e in (entries or []) if e.item_id == iid and not e.equipped]
-        can_price_by_stats = payload.get("stat_type") in ("Weapon", "Armor") and bool(points)
-
-        if can_price_by_stats and (copies or entries is None):
-            med_q = payload.get("median_quality") or 0.0
-            is_weapon = stat_type == "Weapon"
-            target = copies if copies else [None]
-            for copy in target:
-                cinfo = _copy_stats(payload, copy)
-                cstats = cinfo["stats"]
-                quality = float(cinfo["quality"] or med_q)
-                real_q_by_idx[len(rows_out)] = cinfo["quality"]
-                fast, fair, greedy, cur = _stat_suggestion(payload, quality)
-                list_price = int(round(cur[strategy_key])) if cur else int(round(r[strategy_col] or 0))
-                rows_out.append(
-                    {
-                        "item_id": iid,
-                        "Item": r["item_name"],
-                        "Tier": r["stat_tier"],
-                        "Market": market_link,
-                        "My quantity": 1,
-                        "List qty": 1,
-                        "List price": list_price,
-                        "Fast-sell price": int(round(fast)) if fast else None,
-                        "Fair price": int(round(fair)) if fair else None,
-                        "Greedy price": int(round(greedy)) if greedy else None,
-                        "Torn ref": r.get("market_price_ref"),
-                        "Damage %": cstats["damage"],
-                        "Accuracy %": cstats["accuracy"],
-                        "Armor": cstats["armor"],
-                        "quality": quality,
-                        "is_stat": True,
-                        "payload": payload,
-                    }
-                )
-        else:
-            rows_out.append(
-                {
-                    "item_id": iid,
-                    "Item": r["item_name"],
-                    "Tier": r["stat_tier"],
-                    "Market": market_link,
-                    "My quantity": r["my_quantity"],
-                    "List qty": r["my_quantity"],
-                    "List price": int(round(r[strategy_col] or 0)),
-                    "Fast-sell price": r["fast_sell_price"],
-                    "Fair price": r["fair_price"],
-                    "Greedy price": r["greedy_price"],
-                    "Torn ref": r.get("market_price_ref"),
-                    "Damage %": None,
-                    "Accuracy %": None,
-                    "Armor": None,
-                    "quality": None,
-                    "is_stat": False,
-                    "payload": payload,
-                }
-            )
-
-    display_cols = [
-        "Item",
-        "Tier",
-        "Market",
-        "My quantity",
-        "List qty",
-        "List price",
-        "Fast-sell price",
-        "Fair price",
-        "Greedy price",
-        "Torn ref",
-        "Damage %",
-        "Accuracy %",
-        "Armor",
-        "item_id",
-    ]
-    base = pd.DataFrame(rows_out)[display_cols]
-
-    column_config = {
-        "Item": st.column_config.Column(disabled=True),
-        "Tier": st.column_config.Column(disabled=True),
-        "Market": st.column_config.LinkColumn(display_text="Sell"),
-        "My quantity": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-        "List price": st.column_config.NumberColumn(min_value=0, step=1),
-        "List qty": st.column_config.NumberColumn(min_value=1, step=1),
-        "Fast-sell price": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-        "Fair price": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-        "Greedy price": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-        "Torn ref": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-        "Damage %": st.column_config.NumberColumn(min_value=0.0, step=0.01, help="Your copy's damage stat (from its tooltip)."),
-        "Accuracy %": st.column_config.NumberColumn(min_value=0.0, step=0.01, help="Your copy's accuracy stat."),
-        "Armor": st.column_config.NumberColumn(min_value=0.0, step=0.01, help="Your copy's armor value."),
-        "item_id": st.column_config.NumberColumn(disabled=True),
-    }
-
-    try:
-        styled = base.style.map(tier_style, subset=["Tier"])
-    except AttributeError:
-        styled = base.style.applymap(tier_style, subset=["Tier"])
-
-    edited = st.data_editor(
-        styled,
-        width="stretch",
-        hide_index=True,
-        key="list_editor",
-        column_config=column_config,
-    )
-
-    derived_rows: list[dict] = []
-    for idx, row in edited.iterrows():
-        payload = payload_by_item.get(int(row["item_id"]), {})
-        if not payload.get("points"):
-            continue
-        stats = {
-            "damage": row.get("Damage %"),
-            "accuracy": row.get("Accuracy %"),
-            "armor": row.get("Armor"),
-        }
-        have = {k: v for k, v in stats.items() if v is not None and not (isinstance(v, float) and pd.isna(v))}
-        rq = real_q_by_idx.get(idx)
-        q = rq if rq is not None else (quality_from_stats(payload, have) if have else payload.get("median_quality"))
-        if q is None:
-            continue
-        fast, fair, greedy, cur = _stat_suggestion(payload, float(q))
-        if cur is None:
-            continue
-        derived_rows.append(
-            {
-                "Item": row["Item"],
-                "Damage %": stats["damage"],
-                "Accuracy %": stats["accuracy"],
-                "Armor": stats["armor"],
-                "Quality": round(float(q), 2),
-                "Fast-sell price": int(round(fast)) if fast else None,
-                "Fair price": int(round(fair)) if fair else None,
-                "Greedy price": int(round(greedy)) if greedy else None,
-            }
-        )
-    if derived_rows:
-        st.subheader("Copy-level prices (from your stats)")
-        st.dataframe(pd.DataFrame(derived_rows), width="stretch", hide_index=True)
-        n_stat = sum(1 for r in rows_out if r["is_stat"])
-        st.caption(
-            f"{n_stat} weapon/armor copy(ies) priced on the market's quality curve — edit each copy's "
-            "**Damage %** / **Accuracy %** (weapons) or **Armor** (armor) above; prices update here."
-        )
-
-    st.caption(
-        "Edit the **List price** / **List qty** columns, then build the listing text below. "
-        "With stat pricing on, weapon/armor List prices are re-derived from each copy's stats at build time. "
-        "Stackable items show one combined row."
-    )
-
-    left, right = st.columns([1, 1])
-    with left:
-        build = st.button("Build listing text")
-        st.markdown(f"[Open Torn Item Market — Add Listing]({ADD_LISTING_URL})")
-    with right:
-        profiles = an.get("profiles") or {}
-        price_map = {}
-        for _, r in df_summary.iterrows():
-            iid = r.get("item_id")
-            if iid is None or pd.isna(iid):
-                continue
-            lu = {
-                "name": str(r.get("item_name", "")),
-                "fast": float(r.get("fast_sell_price") or 0.0),
-                "fair": float(r.get("fair_price") or 0.0),
-                "greedy": float(r.get("greedy_price") or 0.0),
-            }
-            ptool = payload_by_item.get(int(iid)) or {}
-            pts = ptool.get("points") or []
-            curve = [
-                [float(p["q"]), p.get("fast"), p.get("fair"), p.get("greedy")]
-                for p in pts
-                if p.get("fast") is not None or p.get("fair") is not None or p.get("greedy") is not None
-            ]
-            if curve:
-                lu["curve"] = curve
-            fit = ptool.get("fit") or {}
-            if fit.get("type"):
-                lu["fit"] = {
-                    "type": fit["type"],
-                    "intercept": fit.get("intercept"),
-                    "coef": fit.get("coef") or {},
-                    "base": fit.get("base") or {},
-                }
-            price_map[int(iid)] = lu
-        userjs = build_userscript(price_map, base_stats_map(profiles))
-        try:
-            (ROOT_DIR / "data" / "tma_autofill.user.js").write_text(userjs, encoding="utf-8")
-            st.caption(
-                "Saved to `data/tma_autofill.user.js` — Tampermonkey auto-updates from "
-                "`http://localhost:9999/tma_autofill.user.js` when this page refreshes and the "
-                "update server is running."
-            )
-        except OSError as exc:
-            st.caption(f"Could not write update copy: {exc}")
-        st.download_button(
-            "Download Torn autofill script (.user.js)",
-            userjs,
-            file_name="tma_autofill.user.js",
-            mime="application/javascript",
-            key="download_userjs",
-        )
-        with st.expander("About the autofill script"):
-            st.markdown(
-                f"Installs in [Tampermonkey](https://www.tampermonkey.net/). On the Torn **Add Listing** "
-                f"page it fills each row's price from your suggested prices. For weapons/armor it reads the "
-                f"row's stat rolls, computes the copy's quality from the app's fitted market model, and prices "
-                f"it on the item's quality curve (no extra premium — the curve already reflects quality). "
-                f"Copies with quality **≥ {PREMIUM_THRESHOLD:.0f}%** are highlighted. "
-                "You can change the price basis and thresholds in the `CFG` block at the top of the script."
-            )
-        if build:
-            lines = []
-            used_stat = 0
-            for idx, row in edited.iterrows():
-                price = row.get("List price")
-                qty = row.get("List qty")
-                q = int(qty) if qty is not None and not pd.isna(qty) else 1
-                name = str(row.get("Item", "")).strip()
-                if not name:
-                    continue
-                payload = payload_by_item.get(int(row["item_id"]), {})
-                if auto_stat and payload.get("points"):
-                    stats = {
-                        "damage": row.get("Damage %"),
-                        "accuracy": row.get("Accuracy %"),
-                        "armor": row.get("Armor"),
-                    }
-                    have = {k: v for k, v in stats.items() if v is not None and not (isinstance(v, float) and pd.isna(v))}
-                    rq = real_q_by_idx.get(idx)
-                    quality = rq if rq is not None else (quality_from_stats(payload, have) if have else payload.get("median_quality"))
-                    if quality is not None:
-                        cur = price_at_quality(payload, float(quality)) if payload.get("points") else {}
-                        suggested = cur.get(strategy_key)
-                        if suggested:
-                            price = suggested
-                            used_stat += 1
-                if price is None or (isinstance(price, float) and pd.isna(price)):
-                    continue
-                lines.append(f"{name} x{q} @ ${int(round(float(price))):,}")
-            if used_stat:
-                st.caption(f"{used_stat} row(s) priced from copy stats via the market quality curve.")
-            st.session_state["listing_text"] = "\n".join(lines)
-
-    st.divider()
-    st.subheader("Special finds")
-    cand_rows = []
-    for ro in rows_out:
-        if not ro.get("is_stat") or not ro["payload"].get("points"):
-            continue
-        p = ro["payload"]
-        mid_q = p.get("median_quality")
-        if not mid_q:
-            continue
-        std_cur = price_at_quality(p, float(mid_q))
-        if not std_cur.get("derived"):
-            continue
-        std_price = std_cur.get(strategy_key) or 0
-        copy_price = ro.get("List price") or 0
-        if std_price <= 0 or copy_price <= 0:
-            continue
-        cand_rows.append(
-            {
-                "Sell": True,
-                "Item": ro["Item"],
-                "Damage %": ro.get("Damage %"),
-                "Accuracy %": ro.get("Accuracy %"),
-                "Armor": ro.get("Armor"),
-                "Quality": ro.get("quality"),
-                "Standard": int(round(std_price)),
-                "Copy price": int(round(copy_price)),
-                "+Premium %": (copy_price / std_price - 1) * 100.0,
-            }
-        )
-    if not cand_rows:
-        st.caption("No stat-priced copies to compare against the standard price.")
-    else:
-        df_cand = pd.DataFrame(cand_rows).sort_values("+Premium %", ascending=False)
-        min_p = st.slider(
-            "Show copies priced at least N% above standard",
-            0, 200, 5, 1, key="special_min_premium",
-        )
-        df_special = df_cand[df_cand["+Premium %"] >= min_p]
-        if df_special.empty:
-            st.caption("Nothing above that threshold.")
-        else:
-            st.caption(
-                f"{len(df_special)} of {len(df_cand)} copies priced above the item's standard "
-                f"({strategy}). Uncheck a row to skip it."
-            )
-            chosen = st.data_editor(
-                df_special.reset_index(drop=True),
-                width="stretch",
-                hide_index=True,
-                key="special_editor",
-                column_config={
-                    "Sell": st.column_config.CheckboxColumn(),
-                    "Item": st.column_config.Column(disabled=True),
-                    "Damage %": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Accuracy %": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Armor": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Quality": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Standard": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-                    "Copy price": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-                    "+Premium %": st.column_config.NumberColumn(format="%.1f", disabled=True),
-                },
-            )
-            n_sel = int(chosen["Sell"].sum())
-            if st.button(f"Copy special listings ({n_sel})"):
-                lines = []
-                for _, row in chosen[chosen["Sell"]].iterrows():
-                    price = row.get("Copy price")
-                    if price is None:
-                        continue
-                    lines.append(f"{row['Item']} x1 @ ${int(round(float(price))):,}")
-                st.session_state["special_listing"] = "\n".join(lines)
-
-    if st.session_state.get("special_listing"):
-        st.code(st.session_state["special_listing"], language=None)
-        st.download_button(
-            "Download special .txt",
-            st.session_state["special_listing"],
-            file_name="torn_special_listings.txt",
-            mime="text/plain",
-        )
-
-    if st.session_state.get("listing_text"):
-        st.code(st.session_state["listing_text"], language=None)
-        st.download_button(
-            "Download .txt",
-            st.session_state["listing_text"],
-            file_name="torn_listings.txt",
-            mime="text/plain",
-        )
-
-    with st.expander("Auxiliary tables"):
-        t_parsed, t_unmatched, t_wide, t_long, t_diag = st.tabs(
-            [
-                "Parsed items",
-                "Unmatched items",
-                "Market data (wide)",
-                "Market data (long)",
-                "Pricing diagnostics",
-            ]
-        )
-
-        with t_parsed:
-            st.dataframe(an["df_parsed"], width="stretch", hide_index=True)
-
-        with t_unmatched:
-            if an["unmatched"]:
-                df_unmatched = (
-                    pd.DataFrame(an["unmatched"], columns=["name", "qty"])
-                    .sort_values("name")
-                    .reset_index(drop=True)
-                )
-                st.dataframe(df_unmatched, width="stretch", hide_index=True)
-            else:
-                st.info("No unmatched items.")
-
-        with t_wide:
-            st.dataframe(an["df_market"], width="stretch", hide_index=True)
-
-        with t_long:
-            st.dataframe(an["df_long"], width="stretch", hide_index=True)
-
-        with t_diag:
-            st.dataframe(df_summary, width="stretch", hide_index=True)
 
 
 st.set_page_config(page_title="Torn Market Analyzer", layout="centered")
@@ -1033,28 +386,32 @@ if submitted:
     run_box.update(label=f"Step 3/4 · pricing {n_uniq} distinct items…", state="running")
     bar = st.progress(0.0, text="Pricing items…")
     market_start = time.monotonic()
-    trunc_after = None
     market_errors: list[str] = []
-    per_id_rows: dict[int, dict] = {}
-    for i, iid in enumerate(unique_ids, start=1):
-        row = fetch_100(sess, bucket, api_key, iid, per_id_qty[iid])
+
+    def _on_market_progress(done: int, total: int, row: dict) -> None:
         if "error" in row:
             market_errors.append(str(row["error"]))
-        per_id_rows[iid] = row
-
         elapsed = time.monotonic() - market_start
         eta = ""
         if elapsed > 3.0:
-            rate = i / elapsed
-            eta = f" · ETA ~{(n_uniq - i) / rate / 60.0:.0f} min"
-        bar.progress(i / n_uniq, text=f"Priced {i}/{n_uniq}: {row.get('item_name') or iid}{eta}")
+            rate = done / elapsed
+            eta = f" · ETA ~{(total - done) / rate / 60.0:.0f} min"
+        bar.progress(done / total, text=f"Priced {done}/{total}: {row.get('item_name') or row.get('item_id')}{eta}")
 
-        if elapsed > MARKET_PHASE_TIMEOUT_S:
-            trunc_after = round(elapsed / 60.0, 1)
-            break
+    per_id_rows, truncated = fetch_all_item_markets(
+        sess,
+        bucket,
+        api_key,
+        unique_ids,
+        per_id_qty,
+        max_workers=MAX_WORKERS,
+        on_progress=_on_market_progress,
+        deadline_s=MARKET_PHASE_TIMEOUT_S,
+    )
 
-    if trunc_after is not None:
-        st.warning(f"Market phase stopped after {trunc_after} min; priced {len(per_id_rows)}/{n_uniq} distinct items.")
+    if truncated:
+        elapsed_min = round((time.monotonic() - market_start) / 60.0, 1)
+        st.warning(f"Market phase stopped after {elapsed_min} min; priced {len(per_id_rows)}/{n_uniq} distinct items.")
     run_box.update(
         label=f"Step 3/4 · priced {len(per_id_rows)}/{n_uniq} distinct items"
         + (f" · {len(market_errors)} errors" if market_errors else ""),

@@ -4,42 +4,32 @@ Usage:
     python tools/update_server.py [--port 9999]
 
 Tampermonkey @updateURL: http://localhost:9999/tma_autofill.user.js
+
+Note: the Streamlit app now starts this same server automatically inside
+its own process (see app/ui/autofill_export.py) as soon as the Autofill
+tab runs, so running this script by hand is only needed if you want the
+update server available without the app itself running.
 """
 
 import argparse
-import http.server
-import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from tma.autoupdate_server import DEFAULT_PORT, SCRIPT_NAME, build_server
+
 DATA_DIR = ROOT / "data"
-SCRIPT_NAME = "tma_autofill.user.js"
-
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        script_path = DATA_DIR / SCRIPT_NAME
-        if not script_path.exists():
-            self.send_error(404, "script not yet generated")
-            return
-        content = script_path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/javascript")
-        self.send_header("Cache-Control", "no-cache, max-age=0")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def log_message(self, format, *args):
-        pass  # silence request logs
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=9999)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
-    server = http.server.HTTPServer(("127.0.0.1", args.port), Handler)
+    server = build_server(DATA_DIR / SCRIPT_NAME, port=args.port)
     print(f"Update server listening on http://127.0.0.1:{args.port}/{SCRIPT_NAME}")
     try:
         server.serve_forever()

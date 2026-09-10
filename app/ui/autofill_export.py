@@ -4,13 +4,34 @@ that fills prices directly on Torn's Add Listing page.
 
 from __future__ import annotations
 
+import threading
+
 import pandas as pd
 import streamlit as st
 
+from tma.autoupdate_server import DEFAULT_PORT, build_server
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
 from tma.userscript import build_userscript
 
 from ..paths import AUTOFILL_PATH
+
+
+@st.cache_resource
+def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
+    """Start the Tampermonkey update server on a background thread, once per app process.
+
+    st.cache_resource guarantees this body runs at most once for the life of the
+    Streamlit process, so repeated script reruns never try to rebind the port.
+    """
+    url = f"http://127.0.0.1:{port}/{AUTOFILL_PATH.name}"
+    try:
+        server = build_server(AUTOFILL_PATH, port=port)
+    except OSError:
+        # Port already bound — most likely this same server from a prior process
+        # (e.g. `tools/update_server.py` run by hand), so the URL is still live.
+        return True, url
+    threading.Thread(target=server.serve_forever, daemon=True, name="tma-autoupdate-server").start()
+    return True, url
 
 
 def render_autofill_export(an: dict, ctx: dict) -> None:
@@ -49,18 +70,29 @@ def render_autofill_export(an: dict, ctx: dict) -> None:
         price_map[int(iid)] = lu
 
     userjs = build_userscript(price_map, base_stats_map(profiles))
+    write_ok = True
     try:
         AUTOFILL_PATH.write_text(userjs, encoding="utf-8")
-        st.caption(
-            "Saved to `data/tma_autofill.user.js` — Tampermonkey auto-updates from "
-            "`http://localhost:9999/tma_autofill.user.js` when this page refreshes and the "
-            "update server is running."
-        )
     except OSError as exc:
+        write_ok = False
         st.caption(f"Could not write update copy: {exc}")
 
+    if write_ok:
+        server_ok, update_url = _ensure_update_server()
+        if server_ok:
+            st.success(f"**[Click to load into Tampermonkey]({update_url})**")
+            st.caption(
+                "First run: click the link and Tampermonkey opens its install dialog. "
+                "After every later run, click it again — since it's the same script, Tampermonkey "
+                "shows an instant *update* prompt instead (no downloads folder, no manual reinstall). "
+                "It also rechecks that URL in the background on its own update schedule, but clicking "
+                "after each run is the reliable way to get the latest prices right away."
+            )
+        else:
+            st.warning(f"Couldn't start the local update server ({update_url}). Use the download button below.")
+
     st.download_button(
-        "Download Torn autofill script (.user.js)",
+        "Download Torn autofill script (.user.js) — manual install",
         userjs,
         file_name="tma_autofill.user.js",
         mime="application/javascript",

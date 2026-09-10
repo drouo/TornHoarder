@@ -77,6 +77,20 @@ def parse_add_listings_text(raw_text: str, valid_item_names: Set[str]) -> List[T
                 continue
 
         if current_name is None:
+            low = line.lower()
+            if low in ("equipped", "untradable"):
+                continue
+            m_qty = _QTY_LINE_RE.match(line)
+            if m_qty:
+                continue
+            m_same2 = _NAME_QTY_SAME_LINE_RE.match(line)
+            if m_same2:
+                current_name = m_same2.group(1).strip()
+                current_qty = int(m_same2.group(2))
+            else:
+                current_name = line
+                current_qty = 1
+            current_omitted = False
             continue
 
         low = line.lower()

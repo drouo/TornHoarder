@@ -119,9 +119,10 @@ python tools/dictionary_v2.py
 The script saves:
 
 * `tools/output/torn_items_v2.json`
+* `tools/output/torn_item_profiles.json`
 * `tools/output/torn_item_dictionary.csv`
 
-Copy the generated CSV into `data/torn_item_dictionary.csv` for the app to use the refreshed dictionary.
+Copy the generated CSV and profiles JSON into `data/` (`data/torn_item_dictionary.csv`, `data/torn_item_profiles.json`) for the app to use the refreshed data. The app loads the item dictionary and the stat/price profile model from `data/`.
 
 
 

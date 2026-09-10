@@ -39,6 +39,33 @@ def build_dictionary(items):
     return out
 
 
+def build_profiles(items):
+    profiles = {}
+    for it in items:
+        details = it.get("details") or {}
+        stats = None
+        base_stats = details.get("base_stats")
+        if isinstance(base_stats, dict):
+            stats = {k: float(v) if v is not None else 0.0 for k, v in base_stats.items()}
+        name = it.get("name")
+        if not name:
+            continue
+        profiles[str(it["id"])] = {
+            "id": int(it["id"]),
+            "name": name,
+            "type": it.get("type"),
+            "sub_type": it.get("sub_type"),
+            "category": details.get("category"),
+            "circulation": it.get("circulation"),
+            "market_price": (it.get("value") or {}).get("market_price"),
+            "buy_price": (it.get("value") or {}).get("buy_price"),
+            "sell_price": (it.get("value") or {}).get("sell_price"),
+            "stats": stats,
+            "coverage": details.get("coverage"),
+        }
+    return profiles
+
+
 def main():
     api_key = input("Enter Torn API key: ").strip()
     if not api_key:
@@ -51,6 +78,10 @@ def main():
 
     (out_dir / "torn_items_v2.json").write_text(
         json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    (out_dir / "torn_item_profiles.json").write_text(
+        json.dumps(build_profiles(items), indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
     with (out_dir / "torn_item_dictionary.csv").open("w", newline="", encoding="utf-8-sig") as f:

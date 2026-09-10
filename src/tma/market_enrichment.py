@@ -12,10 +12,18 @@ EXCLUSIVE_TOTAL_UNITS_THRESHOLD = 200.0
 EXCLUSIVE_DOMINANCE_SHARE = 0.50
 EXCLUSIVE_HIGH_FACTOR = 10.0
 
+QUALITY_STEP = 5.0
+MIN_QUALITY_SAMPLES = 5
+MIN_FIT_SAMPLES = 12
+
 
 def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
     price_cols = sorted([c for c in df.columns if c.startswith("price_")], key=lambda x: int(x.split("_")[1]))
     amount_cols = sorted([c for c in df.columns if c.startswith("amount_")], key=lambda x: int(x.split("_")[1]))
+    stat_cols = {
+        base: sorted([c for c in df.columns if c.startswith(f"{base}_")], key=lambda x: int(x.split("_")[1]))
+        for base in ("quality", "damage", "accuracy", "armor")
+    }
 
     records: list[dict] = []
     for _, row in df.iterrows():
@@ -34,14 +42,16 @@ def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(price) or pd.isna(qty) or float(qty) <= 0:
                 continue
 
-            records.append(
-                {
-                    **base,
-                    "listing_rank": idx,
-                    "price": float(price),
-                    "quantity": float(qty),
-                }
-            )
+            record: dict = {
+                **base,
+                "listing_rank": idx,
+                "price": float(price),
+                "quantity": float(qty),
+            }
+            for base_name, col_list in stat_cols.items():
+                col = col_list[idx - 1] if idx <= len(col_list) else None
+                record[f"listing_{base_name}"] = float(row[col]) if (col and not pd.isna(row[col])) else None
+            records.append(record)
 
     cols = [
         "item_id",
@@ -52,6 +62,10 @@ def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
         "listing_rank",
         "price",
         "quantity",
+        "listing_quality",
+        "listing_damage",
+        "listing_accuracy",
+        "listing_armor",
     ]
     return pd.DataFrame.from_records(records, columns=cols)
 
@@ -215,7 +229,9 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
     base_price = float(round(fast_sell_raw))
     fast_sell_price = max(math.floor(base_price) - 1, 0.0) if is_bulk_mode else max(base_price, 0.0)
 
-    return {
+    payload: dict = build_stat_payload(df_item)
+
+    result: dict = {
         "item_id": item_id,
         "item_name": item_name,
         "item_type": item_type,
@@ -229,7 +245,9 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
         "clean_median_price": float(fair_price),
         "clean_q1_price": float(q1_price),
         "clean_q3_price": float(q3_price),
+        "copy_tool": payload,
     }
+    return result
 
 
 def enrich_all_items(long_df: pd.DataFrame) -> pd.DataFrame:
@@ -238,3 +256,196 @@ def enrich_all_items(long_df: pd.DataFrame) -> pd.DataFrame:
 
 def build_summary_from_enriched(enriched_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([compute_price_suggestions_for_item(df_item) for _, df_item in enriched_df.groupby("item_id")])
+
+
+def _weighted_median_price(df: pd.DataFrame) -> float:
+    d = df.sort_values("price")
+    return _weighted_median(d["price"].to_numpy(dtype=float), d["quantity"].to_numpy(dtype=float))
+
+
+def _quality_bucket(points: list[dict], q: float) -> dict:
+    if not points:
+        return {}
+    if q <= points[0]["q"]:
+        return points[0]
+    if q >= points[-1]["q"]:
+        return points[-1]
+    for a, b in zip(points, points[1:]):
+        if a["q"] <= q <= b["q"]:
+            if b["q"] == a["q"]:
+                return b
+            t = (q - a["q"]) / (b["q"] - a["q"])
+            return {k: a[k] + (b[k] - a[k]) * t for k in ("fast", "fair", "greedy")}
+    return points[-1]
+
+
+def price_at_quality(payload: dict, quality: float) -> dict:
+    pts = payload.get("points") or []
+    if not pts:
+        return {"fast": None, "fair": None, "greedy": None, "derived": False}
+    bucket = _quality_bucket(pts, quality)
+    return {
+        "fast": bucket.get("fast"),
+        "fair": bucket.get("fair"),
+        "greedy": bucket.get("greedy"),
+        "derived": True,
+    }
+
+
+def quality_from_stats(payload: dict, stats: dict) -> float | None:
+    if not stats:
+        return None
+    fit = payload.get("fit") or {}
+    stype = fit.get("type")
+    base = fit.get("base") or {}
+    coef = fit.get("coef") or {}
+
+    if stype == "Weapon":
+        dmg = stats.get("damage")
+        acc = stats.get("accuracy")
+        if dmg is None and acc is None:
+            return None
+        try:
+            q = float(fit.get("intercept") or 0.0)
+            if dmg is not None:
+                q += float(coef.get("damage") or 0.0) * (float(dmg) - float(base.get("damage") or 0.0))
+            if acc is not None:
+                q += float(coef.get("accuracy") or 0.0) * (float(acc) - float(base.get("accuracy") or 0.0))
+            return q
+        except (TypeError, ValueError):
+            return None
+    if stype == "Armor":
+        arm = stats.get("armor")
+        if arm is None:
+            return None
+        try:
+            if fit.get("intercept") is not None:
+                return float(fit["intercept"]) + float(coef.get("armor") or 0.0) * (float(arm) - float(base.get("armor") or 0.0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            return (float(arm) - float(base.get("armor") or 0.0)) * 20.0
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _median_stat(df_q: pd.DataFrame, col: str) -> float | None:
+    idx = df_q[col].dropna()
+    if idx.empty:
+        return None
+    return float(np.median(idx.to_numpy(dtype=float)))
+
+
+def build_stat_payload(df_item: pd.DataFrame) -> dict:
+    df_item = df_item.copy()
+    if "listing_quality" not in df_item.columns:
+        return _empty_payload()
+
+    df_q = df_item[df_item["listing_quality"].notna()].copy()
+    if df_q.empty:
+        return _empty_payload()
+
+    points: list[dict] = []
+    df_q = df_q.copy()
+    df_q["bucket"] = (df_q["listing_quality"] / QUALITY_STEP).round() * QUALITY_STEP
+    for bucket, grp in df_q.groupby("bucket"):
+        if grp.empty:
+            continue
+        fast = _weighted_quantile(
+            grp.sort_values("price")["price"].to_numpy(dtype=float),
+            grp["quantity"].to_numpy(dtype=float),
+            0.25,
+        )
+        fair = _weighted_median_price(grp)
+        greedy = _weighted_quantile(
+            grp.sort_values("price")["price"].to_numpy(dtype=float),
+            grp["quantity"].to_numpy(dtype=float),
+            0.75,
+        )
+        points.append({"q": float(bucket), "n": int(len(grp)), "fast": fast, "fair": fair, "greedy": greedy})
+    points.sort(key=lambda p: p["q"])
+
+    median_quality = float(np.median(df_q["listing_quality"].to_numpy(dtype=float)))
+    median_stats = {
+        "damage": _median_stat(df_q, "listing_damage"),
+        "accuracy": _median_stat(df_q, "listing_accuracy"),
+        "armor": _median_stat(df_q, "listing_armor"),
+    }
+
+    has_damage = df_q["listing_damage"].notna().sum()
+    has_accuracy = df_q["listing_accuracy"].notna().sum()
+    has_armor = df_q["listing_armor"].notna().sum()
+    base: dict = {}
+    fit: dict = {"type": None, "intercept": None, "coef": {}, "base": {}, "n": 0}
+
+    if has_damage >= MIN_FIT_SAMPLES or has_accuracy >= MIN_FIT_SAMPLES:
+        fit["type"] = "Weapon"
+        base = {"damage": _median_stat(df_q, "listing_damage"), "accuracy": _median_stat(df_q, "listing_accuracy")}
+        fit["base"] = base
+        _fit_weapon_quality(df_q, fit)
+    elif has_armor >= MIN_FIT_SAMPLES:
+        fit["type"] = "Armor"
+        base = {"armor": _median_stat(df_q, "listing_armor")}
+        fit["base"] = base
+        _fit_armor_quality(df_q, fit)
+
+    return {
+        "stat_type": fit["type"],
+        "points": points,
+        "median_quality": median_quality,
+        "median_stats": median_stats,
+        "fit": fit,
+        "n_quality_listings": int(len(df_q)),
+    }
+
+
+def _fit_weapon_quality(df_q: pd.DataFrame, fit: dict) -> None:
+    dmg = df_q["listing_damage"].dropna()
+    acc = df_q["listing_accuracy"].dropna()
+    mask = df_q["listing_damage"].notna() & df_q["listing_accuracy"].notna()
+    d = df_q[mask]
+    if len(d) < MIN_FIT_SAMPLES:
+        return
+    X = []
+    y = []
+    for _, r in d.iterrows():
+        dev_d = float(r["listing_damage"]) - float(fit["base"]["damage"])
+        dev_a = float(r["listing_accuracy"]) - float(fit["base"]["accuracy"])
+        X.append([1.0, dev_d, dev_a])
+        y.append(float(r["listing_quality"]))
+    fit["n"] = len(y)
+    _run_fit(X, y, fit, keys=("intercept", "damage", "accuracy"))
+
+
+def _fit_armor_quality(df_q: pd.DataFrame, fit: dict) -> None:
+    d = df_q[df_q["listing_armor"].notna()]
+    if len(d) < MIN_FIT_SAMPLES:
+        return
+    X = []
+    y = []
+    for _, r in d.iterrows():
+        dev = float(r["listing_armor"]) - float(fit["base"]["armor"])
+        X.append([1.0, dev])
+        y.append(float(r["listing_quality"]))
+    fit["n"] = len(y)
+    _run_fit(X, y, fit, keys=("intercept", "armor"))
+
+
+def _run_fit(X: list, y: list, fit: dict, keys: tuple) -> None:
+    Xa = np.array(X, dtype=float)
+    ya = np.array(y, dtype=float)
+    coefs, *_ = np.linalg.lstsq(Xa, ya, rcond=None)
+    fit["coef"] = dict(zip(keys[1:], coefs[1:].tolist()))
+    fit["intercept"] = float(coefs[0])
+
+
+def _empty_payload() -> dict:
+    return {
+        "stat_type": None,
+        "points": [],
+        "median_quality": None,
+        "median_stats": None,
+        "fit": {"type": None, "intercept": None, "coef": {}, "base": {}},
+        "n_quality_listings": 0,
+    }

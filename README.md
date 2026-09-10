@@ -70,19 +70,36 @@ All prices are computed from the **cleaned** order book:
 
 torn-market-analyzer/
 ├─ app/
-│  └─ streamlit_app.py
+│  ├─ streamlit_app.py      # input form + pipeline orchestration
+│  ├─ paths.py               # shared path constants
+│  └─ ui/                    # one results tab per module
+│     ├─ pricing_table.py    # price suggestions + listing-text builder
+│     ├─ special_finds.py    # copies priced above the item's standard curve
+│     ├─ autofill_export.py  # Tampermonkey userscript generation/download
+│     └─ diagnostics.py      # parsed/unmatched/market/long/summary tables
 ├─ src/
 │  └─ tma/
+│     ├─ http_client.py      # rate limiting, retries, Torn API error handling
+│     ├─ inventory.py        # user/inventory fetch + pagination
 │     ├─ inventory_matcher.py
+│     ├─ market_fetch.py     # item-market listings fetch (concurrent)
 │     ├─ market_enrichment.py
-│     └─ **init**.py
+│     ├─ item_stats.py       # stat-value model / quality-curve fitting
+│     ├─ quality.py
+│     ├─ userscript.py
+│     ├─ config.py           # local API-key storage
+│     └─ __init__.py
 ├─ data/
-│  └─ torn_item_dictionary.csv
+│  ├─ torn_item_dictionary.csv
+│  └─ torn_item_profiles.json
 ├─ tools/
 │  ├─ dictionary_v2.py
+│  ├─ calibrate_model.py
+│  ├─ update_server.py       # serves the autofill script for Tampermonkey auto-update
 │  └─ output/
 │     ├─ torn_items_v2.json
 │     └─ torn_item_dictionary.csv
+├─ tests/
 ├─ requirements.txt
 └─ README.md
 

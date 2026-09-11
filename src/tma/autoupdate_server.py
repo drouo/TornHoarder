@@ -25,7 +25,13 @@ def _make_handler(script_path: Path) -> type[http.server.BaseHTTPRequestHandler]
                 return
             content = script_path.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "application/javascript")
+            # text/plain, not application/javascript: Tampermonkey's install-
+            # detection only reliably intercepts .user.js navigations served
+            # as plain text (this is what GreasyFork and other userscript
+            # hosts use) — application/javascript makes Chrome just render
+            # the source as a script-viewer page instead of handing it to
+            # the extension.
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, max-age=0")
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()

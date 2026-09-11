@@ -40,7 +40,7 @@ class AutoupdateServerTest(unittest.TestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.read().decode("utf-8"), "// tma userscript")
-            self.assertEqual(resp.headers["Content-Type"], "application/javascript")
+            self.assertEqual(resp.headers["Content-Type"], "text/plain; charset=utf-8")
 
 
 if __name__ == "__main__":

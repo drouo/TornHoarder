@@ -82,11 +82,10 @@ def render_autofill_export(an: dict, ctx: dict) -> None:
         if server_ok:
             st.success(f"**[Click to load into Tampermonkey]({update_url})**")
             st.caption(
-                "First run: click the link and Tampermonkey opens its install dialog. "
-                "After every later run, click it again — since it's the same script, Tampermonkey "
-                "shows an instant *update* prompt instead (no downloads folder, no manual reinstall). "
-                "It also rechecks that URL in the background on its own update schedule, but clicking "
-                "after each run is the reliable way to get the latest prices right away."
+                "Click it — Tampermonkey should open its install/update dialog. Some Tampermonkey "
+                "setups don't auto-detect scripts served from a local address like this one; if "
+                "clicking just shows a blank Tampermonkey web page instead of an install prompt, "
+                "use the download button below instead."
             )
         else:
             st.warning(f"Couldn't start the local update server ({update_url}). Use the download button below.")
@@ -97,6 +96,12 @@ def render_autofill_export(an: dict, ctx: dict) -> None:
         file_name="tma_autofill.user.js",
         mime="application/javascript",
         key="download_userjs",
+    )
+    st.caption(
+        "Manual install: after downloading, open the Tampermonkey Dashboard "
+        "(extension icon → **Dashboard**) and drag the downloaded file onto that page, "
+        "or use its **Utilities → Import from file**. Re-download and re-import after each "
+        "run to refresh the prices."
     )
     with st.expander("About the autofill script"):
         st.markdown(

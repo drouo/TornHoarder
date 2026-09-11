@@ -469,7 +469,19 @@ if submitted:
         st.error("No market data was retrieved.")
         st.stop()
 
-    rows = [dict(per_id_rows[iid], my_quantity=qty) for iid, qty in agg if iid in per_id_rows]
+    # per_id_rows can hold error placeholders (no listings data) alongside
+    # successful fetches — drop those before building the market table, or
+    # a wholly-failed run silently produces a table with none of the
+    # expected columns instead of a clear error.
+    rows = [
+        dict(per_id_rows[iid], my_quantity=qty)
+        for iid, qty in agg
+        if iid in per_id_rows and "error" not in per_id_rows[iid]
+    ]
+    if not rows:
+        run_box.update(label="Market phase failed", state="error")
+        st.error("Every item lookup failed — no market data was retrieved. See the errors above.")
+        st.stop()
     df_market = pd.DataFrame(rows)
 
     for i in range(1, 101):

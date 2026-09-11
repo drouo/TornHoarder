@@ -400,6 +400,13 @@ if submitted:
                 if owned:
                     entries = owned
                     qty = sum(e.amount for e in owned)
+                    if profile and profile.get("type") in ("Weapon", "Armor"):
+                        uid_targets = sorted({e.uid for e in owned if e.uid})
+                        if uid_targets:
+                            uid_stats, uid_errors = fetch_item_stats_many(sess, api_key, uid_targets, bucket_take=bucket.take)
+                            for err in uid_errors:
+                                st.caption(f"copy stats: {err}")
+                            st.caption(f"Read individual stats for {len(uid_stats)} of your {len(owned)} copies.")
                 elif category is None:
                     st.caption("Couldn't determine this item's inventory category; pricing for qty 1, not your real stock.")
                     entries = [InventoryEntry(item_id=iid, name=single_name, amount=1, equipped=False, uid=None)]

@@ -10,6 +10,7 @@ from tma.inventory import (
     _dedupe,
     _has_more,
     _parse_page,
+    inventory_category_for_profile,
     to_rows,
 )
 
@@ -84,6 +85,28 @@ class CooldownTest(unittest.TestCase):
 
     def test_default(self):
         self.assertEqual(cooldown_seconds(None, default=7), 7.0)
+
+
+class InventoryCategoryForProfileTest(unittest.TestCase):
+    def test_weapon_uses_its_category(self):
+        self.assertEqual(inventory_category_for_profile({"type": "Weapon", "category": "Primary"}), "Primary")
+
+    def test_weapon_unknown_category_is_none(self):
+        self.assertIsNone(inventory_category_for_profile({"type": "Weapon", "category": "Exotic"}))
+
+    def test_armor_maps_to_defensive(self):
+        # Profiles never carry a usable category for armor (it's always None),
+        # so this mapping can't be read off the profile itself.
+        self.assertEqual(inventory_category_for_profile({"type": "Armor", "category": None}), "Defensive")
+
+    def test_other_type_matches_itself(self):
+        self.assertEqual(inventory_category_for_profile({"type": "Drug"}), "Drug")
+
+    def test_type_not_an_inventory_category_is_none(self):
+        self.assertIsNone(inventory_category_for_profile({"type": "Unused"}))
+
+    def test_missing_profile_is_none(self):
+        self.assertIsNone(inventory_category_for_profile(None))
 
 
 if __name__ == "__main__":

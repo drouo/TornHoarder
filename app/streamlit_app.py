@@ -21,6 +21,7 @@ from tma.inventory import (
     fetch_inventory,
     fetch_item_stats,
     fetch_item_stats_many,
+    inventory_category_for_profile,
     to_rows,
     InventoryEntry,
     INVENTORY_CATEGORIES,
@@ -94,10 +95,12 @@ Use the scope selector to pull only the categories you care about
 only the categories you want — the fastest way to test armour/weapons
 when a full weapons scan is too slow.
 
-**Single item** (in the `Inventory source` selector) skips the inventory
-call entirely: type an item name or ID and it prices just that one item
-in ~2 calls. Add the `uid` of one of your own weapon/armor copies to
-price *that exact copy* with its real stats instead of market medians.
+**Single item** (in the `Inventory source` selector) prices just that one
+item: type a name or ID and it looks up how many you actually own (one
+inventory category, not a full scan) along with the market price. Add the
+`uid` of one of your own weapon/armor copies to price *that exact copy*
+with its real stats instead of market medians — that skips the inventory
+lookup entirely, since you're pricing one specific copy either way.
 
 Each run updates a step tracker (pull items → read copy stats → market
 listings → suggested prices) from start to finish.
@@ -197,7 +200,7 @@ elif source == "Paste items":
 else:
     st.markdown(
         "Checks **one item only** — pick it by name or ID, optionally give a weapon/armor copy's "
-        "`uid` to price that exact copy. Uses ~2 API calls, so it's handy for spot checks and testing."
+        "`uid` to price that exact copy instead. Handy for spot checks without a full inventory scan."
     )
     raw = None
     pull_categories = None
@@ -369,19 +372,46 @@ if submitted:
 
             single_name, iid = resolved[0]
             single_uid = st.session_state.get("single_uid", "").strip() or None
-            entry = InventoryEntry(item_id=iid, name=single_name, amount=1, equipped=False, uid=single_uid)
-            entries = [entry]
-            df_parsed = pd.DataFrame([{"name": single_name, "id": iid, "quantity": 1}])
-            agg = [(iid, 1)]
-            items = [(iid, 1, single_name)]
             unmatched = []
             uid_stats = {}
+
             if single_uid:
+                # An explicit copy uid means "price this one copy", regardless
+                # of how many of the item the account actually owns.
+                entries = [InventoryEntry(item_id=iid, name=single_name, amount=1, equipped=False, uid=single_uid)]
+                df_parsed = pd.DataFrame([{"name": single_name, "id": iid, "quantity": 1}])
+                agg = [(iid, 1)]
+                items = [(iid, 1, single_name)]
                 stats = fetch_item_stats(sess, api_key, single_uid, bucket_take=bucket.take)
                 if stats:
                     uid_stats[single_uid] = stats
                 else:
                     st.caption(f"Couldn't read stats for copy uid {single_uid}; using market medians.")
+            else:
+                profile = load_profiles(PROFILES_PATH).get(str(iid))
+                category = inventory_category_for_profile(profile)
+                owned: list[InventoryEntry] = []
+                if category:
+                    inv = fetch_inventory(sess, api_key, categories=(category,), bucket_take=bucket.take)
+                    for err in inv.errors:
+                        st.caption(f"inventory: {err}")
+                    owned = [e for e in inv.entries if e.item_id == iid and not e.equipped]
+
+                if owned:
+                    entries = owned
+                    qty = sum(e.amount for e in owned)
+                elif category is None:
+                    st.caption("Couldn't determine this item's inventory category; pricing for qty 1, not your real stock.")
+                    entries = [InventoryEntry(item_id=iid, name=single_name, amount=1, equipped=False, uid=None)]
+                    qty = 1
+                else:
+                    st.caption("You don't own any non-equipped copies right now; pricing for qty 1, not your real stock.")
+                    entries = [InventoryEntry(item_id=iid, name=single_name, amount=1, equipped=False, uid=None)]
+                    qty = 1
+
+                df_parsed = pd.DataFrame([{"name": single_name, "id": iid, "quantity": qty}])
+                agg = [(iid, qty)]
+                items = [(iid, qty, single_name)]
         run_box.update(label="Step 1/4 · item resolved" + (" · copy stats read" if single_uid else ""), state="complete")
 
     per_id_qty: dict[int, int] = {}

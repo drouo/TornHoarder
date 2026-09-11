@@ -46,6 +46,26 @@ CATEGORY_LABELS = {
 
 MAX_PAGES = 200
 
+# item_stats.load_profiles() gives each item a "type" (Weapon/Armor/Drug/...)
+# and, for weapons only, a "category" (Primary/Secondary/...). Neither maps
+# 1:1 onto user/inventory's `cat` filter: weapons need their own category,
+# armor's `cat` is "Defensive" with no profile field to read it from, and
+# everything else's `type` happens to equal its `cat` value directly.
+_ARMOR_INVENTORY_CATEGORY = "Defensive"
+
+
+def inventory_category_for_profile(profile: Optional[dict]) -> Optional[str]:
+    """Map an item profile to the `cat` value user/inventory expects, or None if unknown."""
+    if not profile:
+        return None
+    ptype = profile.get("type")
+    if ptype == "Weapon":
+        cat = profile.get("category")
+        return cat if cat in INVENTORY_CATEGORIES else None
+    if ptype == "Armor":
+        return _ARMOR_INVENTORY_CATEGORY
+    return ptype if ptype in INVENTORY_CATEGORIES else None
+
 
 @dataclass(frozen=True)
 class InventoryEntry:

@@ -141,77 +141,80 @@ anything you'd rather keep at full price, and copy the listing text.
         """
     )
 
-with st.form("input_form", clear_on_submit=False):
-    st.subheader("Item Market listings")
+st.subheader("Item Market listings")
+st.markdown(
+    "[Quick access to your listings](https://www.torn.com/page.php?sid=ItemMarket#/addListing)",
+    unsafe_allow_html=False,
+)
+st.caption(
+    "Run pipeline — progress is tracked live below the button: "
+    "1 pull items · 2 read copy stats · 3 market listings · 4 compute prices"
+)
+
+# Kept outside the form: widgets inside st.form() only trigger a rerun on
+# submit, so a radio choice made here wouldn't reveal its matching inputs
+# (e.g. the Single item text box) until a first, doomed submit attempt.
+source = st.radio(
+    "Inventory source",
+    ("API inventory", "Paste items", "Single item"),
+    horizontal=True,
+    key="source",
+    help="Pull your inventory from Torn, paste the Add Listings text as before, or check one item only.",
+)
+
+if source == "API inventory":
     st.markdown(
-        "[Quick access to your listings](https://www.torn.com/page.php?sid=ItemMarket#/addListing)",
-        unsafe_allow_html=False,
+        "Pulls your inventory via `user/inventory`. Needs a Torn key with the "
+        "**user → inventory** permission. One row is kept per inventory entry; "
+        "equipped items are skipped."
     )
-    st.caption(
-        "Run pipeline — progress is tracked live below the button: "
-        "1 pull items · 2 read copy stats · 3 market listings · 4 compute prices"
-    )
+    raw = None
 
-    source = st.radio(
-        "Inventory source",
-        ("API inventory", "Paste items", "Single item"),
+    scope = st.radio(
+        "Inventory scope",
+        ("Everything", "Weapons + Armor", "Custom…"),
         horizontal=True,
-        key="source",
-        help="Pull your inventory from Torn, paste the Add Listings text as before, or check one item only.",
+        key="inventory_scope",
+        help="Pulling fewer categories means fewer market calls and less data transfer.",
+    )
+    pull_categories: tuple[str, ...] | None = None
+    if scope == "Weapons + Armor":
+        pull_categories = ("Primary", "Secondary", "Melee", "Temporary", "Defensive")
+    elif scope == "Custom…":
+        chosen = st.multiselect(
+            "Categories to pull",
+            [(CATEGORY_LABELS.get(c, c), c) for c in INVENTORY_CATEGORIES],
+            key="inventory_categories",
+        )
+        pull_categories = tuple(chosen) or None
+elif source == "Paste items":
+    raw = st.text_area(
+        "Paste your items",
+        height=220,
+        placeholder="Paste your full Add Listings items text here…",
+    )
+    pull_categories = None
+else:
+    st.markdown(
+        "Checks **one item only** — pick it by name or ID, optionally give a weapon/armor copy's "
+        "`uid` to price that exact copy. Uses ~2 API calls, so it's handy for spot checks and testing."
+    )
+    raw = None
+    pull_categories = None
+    single_query = st.text_input(
+        "Item name or ID",
+        key="single_query",
+        placeholder="e.g. AK-47 or 477",
+    )
+    single_uid = st.text_input(
+        "Your copy UID (optional)",
+        key="single_uid",
+        placeholder="e.g. 18997743406",
+        help="The `uid` of one of your weapon/armor copies (from `torn/{uid}?selections=itemdetails`). "
+        "Pricing the copy uses its real stats instead of market medians.",
     )
 
-    if source == "API inventory":
-        st.markdown(
-            "Pulls your inventory via `user/inventory`. Needs a Torn key with the "
-            "**user → inventory** permission. One row is kept per inventory entry; "
-            "equipped items are skipped."
-        )
-        raw = None
-
-        scope = st.radio(
-            "Inventory scope",
-            ("Everything", "Weapons + Armor", "Custom…"),
-            horizontal=True,
-            key="inventory_scope",
-            help="Pulling fewer categories means fewer market calls and less data transfer.",
-        )
-        pull_categories: tuple[str, ...] | None = None
-        if scope == "Weapons + Armor":
-            pull_categories = ("Primary", "Secondary", "Melee", "Temporary", "Defensive")
-        elif scope == "Custom…":
-            chosen = st.multiselect(
-                "Categories to pull",
-                [(CATEGORY_LABELS.get(c, c), c) for c in INVENTORY_CATEGORIES],
-                key="inventory_categories",
-            )
-            pull_categories = tuple(chosen) or None
-    elif source == "Paste items":
-        raw = st.text_area(
-            "Paste your items",
-            height=220,
-            placeholder="Paste your full Add Listings items text here…",
-        )
-        pull_categories = None
-    else:
-        st.markdown(
-            "Checks **one item only** — pick it by name or ID, optionally give a weapon/armor copy's "
-            "`uid` to price that exact copy. Uses ~2 API calls, so it's handy for spot checks and testing."
-        )
-        raw = None
-        pull_categories = None
-        single_query = st.text_input(
-            "Item name or ID",
-            key="single_query",
-            placeholder="e.g. AK-47 or 477",
-        )
-        single_uid = st.text_input(
-            "Your copy UID (optional)",
-            key="single_uid",
-            placeholder="e.g. 18997743406",
-            help="The `uid` of one of your weapon/armor copies (from `torn/{uid}?selections=itemdetails`). "
-            "Pricing the copy uses its real stats instead of market medians.",
-        )
-
+with st.form("input_form", clear_on_submit=False):
     api_key = st.text_input(
         "Enter your Torn API key",
         value=st.session_state["api_key"],

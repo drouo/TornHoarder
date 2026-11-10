@@ -60,5 +60,13 @@ class UserscriptTest(unittest.TestCase):
         self.assertIn('plan === "keep" || plan === "shop"', out)
 
 
+    def test_version_comes_from_the_package(self):
+        from tma import __version__
+
+        out = build_userscript({}, {})
+        self.assertIn("// @version      " + __version__ + "\n", out)
+        self.assertNotIn("__VERSION__", out)
+
+
 if __name__ == "__main__":
     unittest.main()

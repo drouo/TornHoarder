@@ -17,6 +17,7 @@ if str(SRC_DIR) not in sys.path:
 from app.paths import DICT_PATH, OC_ITEMS_PATH, PROFILES_PATH, UID_STATS_PATH
 from app.ui import autofill_export
 from app.ui.results import render_results
+from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
 from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
@@ -50,7 +51,7 @@ def load_stat_layer(profiles_mtime: float) -> tuple[dict, StatValueModel]:
     return profiles, model
 
 
-st.set_page_config(page_title="TornHoarder", layout="centered")
+st.set_page_config(page_title=f"TornHoarder v{__version__}", layout="centered")
 
 # Serve the autofill script for Tampermonkey's update checks from app start,
 # not only once a finished run has rendered the Autofill tab.
@@ -74,8 +75,9 @@ st.markdown(
 
 st.title("TornHoarder")
 st.markdown(
-    """
+    f"""
     <p style="margin-top:-12px; font-size:0.95rem; color:#666;">
+        <b>v{__version__}</b> ·
         Originally created by
         <a href="https://www.torn.com/profiles.php?XID=3968250" target="_blank" style="text-decoration:none;">
             Kzon [3968250]

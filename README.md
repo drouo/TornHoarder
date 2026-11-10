@@ -1,5 +1,7 @@
 # TornHoarder
 
+[![Latest release](https://img.shields.io/github/v/release/drouo/TornHoarder)](https://github.com/drouo/TornHoarder/releases)
+
 **TornHoarder** turns a hoard of Torn items into cash without giving anything away. It pulls your inventory through the Torn API, prices every item against the live Item Market, and decides *how* each one should go: dump it, undercut, hold out for top dollar, sell it to a city shop, or keep it. Then it does the tedious part in your browser. A Tampermonkey script fills Add Listing prices and walks you through city-shop sales with one button. Every sale is still your click.
 
 Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.com/profiles.php?XID=3968250)) as *Torn Market Analyzer*. Now maintained by [TheOldFarmer [3653623]](https://www.torn.com/profiles.php?XID=3653623).

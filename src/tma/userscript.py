@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from typing import Dict, Optional
 
+from . import __version__
+
 TEMPLATE = """\
 // ==UserScript==
 // @name         TornHoarder
 // @namespace    tornhoarder
-// @version      1.1.0
+// @version      __VERSION__
 // @description  TornHoarder: fills Add Listing prices from your sell plan and runs one-button city shop sales.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
 // @match        https://www.torn.com/shops.php*
@@ -44,7 +46,7 @@ TEMPLATE = """\
 
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
-        : "1.1.0";
+        : "__VERSION__";
     var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
     // What was filled / held on this page, for the review list behind the status box.
     var FILLED = [];
@@ -721,4 +723,5 @@ def build_userscript(
         .replace("__BASE_STATS__", json.dumps({str(k): v for k, v in base_stats.items()}))
         .replace("__CFG__", json.dumps(merged_cfg))
         .replace("__SHOP__", json.dumps(shop_run or {"route": [], "items": {}}))
+        .replace("__VERSION__", __version__)
     )

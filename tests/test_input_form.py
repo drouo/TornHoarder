@@ -46,5 +46,13 @@ class InputFormConditionalWidgetsTest(unittest.TestCase):
         self.assertEqual(config.load_sell_prefs()[0]["sell_categories"], ["Primary", "Defensive"])
 
 
+    def test_landing_page_shows_the_version(self):
+        from tma import __version__
+
+        at = AppTest.from_file(str(APP))
+        at.run(timeout=30)
+        self.assertTrue(any("v" + __version__ in m.value for m in at.markdown))
+
+
 if __name__ == "__main__":
     unittest.main()

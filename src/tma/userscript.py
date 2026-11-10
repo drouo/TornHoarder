@@ -134,7 +134,7 @@ TEMPLATE = """\
     // Returns {price, qty, plan} to fill, or {hold: reason}. `rolls` are the
     // copy's damage/accuracy (weapons) or armor shown on the row; `isCopy`
     // means a weapon/armor row (one copy, ticked via "Select").
-    function planListing(itemId, entry, rolls, isCopy, owned) {
+    function planListing(itemId, entry, rolls, isCopy, owned, shopHeldSoFar) {
         var base = BASE_STATS[itemId];
         var quality = null;
         if (rolls) {
@@ -152,8 +152,11 @@ TEMPLATE = """\
         var refMin = entry.refMin;
         if (plan === "shop") {
             var routed = SHOP.items[String(itemId)];
-            if (routed) {
-                return { hold: "sell at " + stepName(routed.step) + " instead (shop run pays more)" };
+            // The shop run takes specific weapon/armor copies (by uid), which this
+            // page can't see: hold only as many copies as were routed there.
+            var routedCopies = routed && routed.uids ? routed.uids.length : null;
+            if (routed && (!isCopy || routedCopies == null || (shopHeldSoFar || 0) < routedCopies)) {
+                return { hold: "sell at " + stepName(routed.step) + " instead (shop run pays more)", shopHold: true };
             }
             if (!entry.fallback) {
                 return { hold: "sell to a shop" };
@@ -216,6 +219,8 @@ TEMPLATE = """\
         var excluded = {};
         var filled = {};
         var held = {};
+        var shopHeld = {};         // weapon/armor copies held back for the shop run, per item
+        var shopKeys = {};         // ...and which rows (by rolls) they are, so a redraw isn't recounted
         var phase = "plan";        // plan -> filling -> filled -> adding -> done
         var loading = false;       // filling: getting Torn to load the whole tab
         var currentTab = "";
@@ -252,9 +257,14 @@ TEMPLATE = """\
                 var e = PRICE_MAP[id];
                 var plan = e.plan;
                 var list = e.list;
+                var copies = e.copies;
                 if (plan === "shop") {
-                    if (SHOP.items[id] || !e.fallback) {
+                    var routed = SHOP.items[id];
+                    if (!e.fallback || (routed && (copies == null || !routed.uids))) {
                         return;
+                    }
+                    if (routed && copies != null) {
+                        copies = Math.max(copies - routed.uids.length, 0);
                     }
                     plan = e.fallback.plan;
                     list = e.fallback.list;
@@ -262,9 +272,10 @@ TEMPLATE = """\
                 if (!plan || plan === "keep") {
                     return;
                 }
-                if (e.copies != null) {
-                    if (e.copies > 0) {
-                        lines.push({ id: id, name: e.name, qty: e.copies, value: e.estimate || 0, copies: true });
+                if (copies != null) {
+                    if (copies > 0) {
+                        var value = e.copies ? (e.estimate || 0) * copies / e.copies : 0;
+                        lines.push({ id: id, name: e.name, qty: copies, value: value, copies: true });
                     }
                 } else if ((e.qty || 0) > 0 && list) {
                     lines.push({ id: id, name: e.name, qty: e.qty, price: list, value: e.qty * list });
@@ -334,7 +345,7 @@ TEMPLATE = """\
                     continue;
                 }
                 var entry = PRICE_MAP[info.id];
-                if (!entry || excluded[info.id] || held[info.key]) {
+                if (!entry || excluded[info.id] || held[info.key] || shopKeys[info.key]) {
                     continue;
                 }
                 // A row that already has a price was filled (by us or by you).
@@ -343,8 +354,16 @@ TEMPLATE = """\
                 if (info.priceBox.value) {
                     continue;
                 }
-                var d = planListing(info.id, entry, info.rolls, !!info.select, info.owned);
+                var d = planListing(info.id, entry, info.rolls, !!info.select, info.owned, shopHeld[info.id]);
                 if (d.hold) {
+                    if (d.shopHold && info.select) {
+                        // One copy per row: count it once, and remember the row so the
+                        // list redrawing it later doesn't count (or list) it again.
+                        shopHeld[info.id] = (shopHeld[info.id] || 0) + 1;
+                        shopKeys[info.key] = true;
+                        held[info.key + "#shop"] = { name: info.name, reason: d.hold };
+                        continue;
+                    }
                     held[info.key] = { name: info.name, reason: d.hold };
                     continue;
                 }
@@ -622,6 +641,8 @@ TEMPLATE = """\
             }
             filled = {};
             held = {};
+            shopHeld = {};
+            shopKeys = {};
             phase = "plan";
             panelSig = "";
             render();

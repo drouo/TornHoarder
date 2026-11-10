@@ -31,7 +31,7 @@ global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const L = window.__TH_LIST__;
 const cases = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-const out = cases.map(c => c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned));
+const out = cases.map(c => c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned, c.shopHeld));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -47,10 +47,13 @@ PRICE_MAP = {
     "1350": {"name": "ID Badge", "plan": "keep", "list": None, "qty": 0, "fast": 1, "fair": 1, "greedy": 1},
     "8": {"name": "Axe", "plan": "dump", "auto": True, "list": 1000, "fast": 1000, "fair": 1100, "greedy": 1200,
           "curve": AXE_CURVE, "fit": AXE_FIT, "copies": 3, "estimate": 3300, "keepMinQuality": 40.0, "keepAll": False},
+    "438": {"name": "Cricket Bat", "plan": "shop", "auto": True, "list": 10000, "fast": 9000, "fair": 9500, "greedy": 9900,
+            "copies": 32, "estimate": 320000, "shopMin": 10527, "fallback": {"plan": "competitive", "list": 9000, "refMin": None}},
     "999": {"name": "Cheap Thing", "plan": "dump", "list": 10, "qty": 4, "refMin": 500, "fast": 11, "fair": 12, "greedy": 13},
 }
 SHOP_RUN = {"route": [{"step": "pharmacy", "name": "Pharmacy", "items": 431, "payout": 3879000, "url": "u"}],
-            "items": {"1483": {"qty": 431, "uids": None, "price": 9000, "step": "pharmacy", "name": "Insulin"}}}
+            "items": {"1483": {"qty": 431, "uids": None, "price": 9000, "step": "pharmacy", "name": "Insulin"},
+                      "438": {"qty": 1, "uids": ["111"], "price": 10000, "step": "bigalgunshop", "name": "Cricket Bat"}}}
 
 
 @unittest.skipUnless(NODE, "node not installed")
@@ -107,6 +110,15 @@ class ListModeDecisionsTest(unittest.TestCase):
         (copy,) = self.run_cases([{"id": "8", "entry": cheap_band, "rolls": {"damage": 55, "accuracy": 55}, "isCopy": True, "owned": 1}])
         self.assertEqual((copy["price"], copy["plan"]), (950, "dump"))
 
+    def test_only_the_routed_number_of_copies_is_held_for_the_shop(self):
+        first, second = self.run_cases([
+            {"id": "438", "entry": PRICE_MAP["438"], "rolls": None, "isCopy": True, "owned": 1, "shopHeld": 0},
+            {"id": "438", "entry": PRICE_MAP["438"], "rolls": None, "isCopy": True, "owned": 1, "shopHeld": 1},
+        ])
+        self.assertTrue(first["shopHold"])
+        # The other 31 Cricket Bats aren't going to the shop: market plan, no shop floor.
+        self.assertEqual((second["price"], second["plan"]), (9000, "competitive"))
+
     def test_under_half_reference_price_is_held(self):
         (cheap,) = self.run_cases([{"id": "999", "entry": PRICE_MAP["999"], "rolls": None, "isCopy": False, "owned": 4}])
         self.assertIn("under half Torn's reference price", cheap["hold"])
@@ -114,7 +126,9 @@ class ListModeDecisionsTest(unittest.TestCase):
     def test_review_list_skips_kept_and_shop_routed_items(self):
         (lines,) = self.run_cases([{"lines": True}])
         names = [l["name"] for l in lines]
-        self.assertEqual(set(names), {"Beer", "Shark Fin", "Axe", "Cheap Thing"})
+        self.assertEqual(set(names), {"Beer", "Shark Fin", "Axe", "Cheap Thing", "Cricket Bat"})
+        bat = next(l for l in lines if l["name"] == "Cricket Bat")
+        self.assertEqual((bat["qty"], round(bat["value"])), (31, 310000))
         axe = next(l for l in lines if l["name"] == "Axe")
         self.assertEqual((axe["qty"], axe["copies"]), (3, True))
 

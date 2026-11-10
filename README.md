@@ -87,6 +87,19 @@ The thresholds can be changed under **Rules**. The autofill script fills each ro
 
 
 
+### 7) Listing on the Item Market
+
+After the shop run, open **Add Listing** (the Sell plan tab links to it). The userscript puts one green button in the same spot:
+
+1. **Review:** the panel lists every planned listing (item × quantity × price, with the total). Click a line to leave it out. If Torn still has selections from an earlier session, the panel warns you to clear them first.
+2. **Fill N items:** goes tab by tab through the categories that hold planned items, lets Torn load each full list, and fills it:
+   - stacks get quantity = **Selling** and the price,
+   - weapon/armor copies get **Select** and a price from that copy's rolls (good rolls go to Top dollar, and no copy lists below the item's floor).
+   Keep, crime items, your best copies and copies routed to a shop are held back, with the reason shown. The *anonymous (+10% fee)* box is never touched.
+3. **Add N listings to market · $X:** the total is Torn's own. The button presses Torn's ADD TO MARKET (then **Confirm**, if Torn asks).
+
+A full plan of about 650 rows fills in roughly 3½ minutes. **Start over** clears Torn's selections.
+
 ### Keeping what you need
 
 Only the surplus is ever sold. The **Keeping** column on the Sell plan tab shows how many of each item stay in your inventory; type a number there to set it by hand. The defaults:

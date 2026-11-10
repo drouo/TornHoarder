@@ -1,10 +1,18 @@
-# Torn Market Analyzer
+# TornHoarder
 
-**Torn Market Analyzer** is a Python + Streamlit tool to help you price **Item Market** listings in the online game **Torn**.
+**TornHoarder** turns a hoard of Torn items into cash without giving anything away. It pulls your inventory through the Torn API, prices every item against the live Item Market, and decides *how* each one should go: dump it, undercut, hold out for top dollar, sell it to a city shop, or keep it. Then it does the tedious part in your browser. A Tampermonkey script fills Add Listing prices and walks you through city-shop sales with one button. Every sale is still your click.
 
-You paste the raw text from Torn’s **Item Market -> Add Listing** page, the app matches items to Torn item IDs using a local dictionary, fetches up to the first **100 sell listings** per item from Torn’s **v2 API**, cleans the order book, and outputs **three market-aware price suggestions** per item.
+Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.com/profiles.php?XID=3968250)) as *Torn Market Analyzer*. Now maintained by [TheOldFarmer [3653623]](https://www.torn.com/profiles.php?XID=3653623).
 
+## Quick start
 
+1. Install Python 3.10+, then run `pip install -r requirements.txt`.
+2. Start the app with `streamlit run app/streamlit_app.py`. On Windows you can use `powershell -ExecutionPolicy Bypass -File tools\server.ps1 start` instead.
+3. Open http://localhost:8501, enter a **Limited** Torn API key, choose your **Sell categories**, and click **Run**.
+4. On the **Autofill script** tab, click the link to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together.
+5. On the **Sell plan** tab, click **Start shop run →** for city-shop sales, then open Torn's Add Listing page for everything else.
+
+The rest of this README describes how the pricing works.
 
 ## Output
 
@@ -169,11 +177,14 @@ Copy the generated CSV and profiles JSON into `data/` (`data/torn_item_dictionar
 
 
 
-## Torn API usage & privacy
+## Torn API key & privacy
 
-* Uses a **public (read-only)** Torn API key.
-* Performs **read-only** requests to the Item Market endpoint.
-* No keys or market data are transmitted anywhere except directly to Torn.
-* The key is stored only in Streamlit session state while the app is running.
+| | |
+|---|---|
+| **Key access level** | **Limited**: inventory pulls need `user → inventory`. Market and item lookups work with any key. |
+| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `market/{id}/itemmarket`, `torn/items`. All read-only. |
+| **Key storage** | Only on your PC, in `~/.tma_config.json`, and only if **Remember API key** is ticked. |
+| **Data sharing** | None. Requests go straight from your PC to `api.torn.com`. The userscript talks only to Torn and to this app on `127.0.0.1` (your own machine). |
+| **Purpose** | Pricing and selling your own items. |
 
-
+TornHoarder never buys, sells or lists anything by itself. The userscript fills in fields and shows one button, and each sale or listing happens only when you click it: one click, one action, in line with Torn's scripting rules.

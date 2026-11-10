@@ -50,7 +50,7 @@ def load_stat_layer(profiles_mtime: float) -> tuple[dict, StatValueModel]:
     return profiles, model
 
 
-st.set_page_config(page_title="Torn Market Analyzer", layout="centered")
+st.set_page_config(page_title="TornHoarder", layout="centered")
 
 # Serve the autofill script for Tampermonkey's update checks from app start,
 # not only once a finished run has rendered the Autofill tab.
@@ -72,13 +72,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Torn Market Analyzer")
+st.title("TornHoarder")
 st.markdown(
     """
     <p style="margin-top:-12px; font-size:0.95rem; color:#666;">
-        Under development by
+        Originally created by
         <a href="https://www.torn.com/profiles.php?XID=3968250" target="_blank" style="text-decoration:none;">
             Kzon [3968250]
+        </a> · maintained by
+        <a href="https://www.torn.com/profiles.php?XID=3653623" target="_blank" style="text-decoration:none;">
+            TheOldFarmer [3653623]
         </a>. Coffee tips are always appreciated :)
     </p>
     """,

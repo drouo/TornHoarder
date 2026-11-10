@@ -46,5 +46,19 @@ class UserscriptTest(unittest.TestCase):
         self.assertEqual(DEFAULT_CFG["fillQty"], True)
 
 
+    def test_embeds_sell_plan_and_plan_cfg(self):
+        price_map = {
+            641: {"name": "Kevlar Gloves", "fast": 800.0, "fair": 900.0, "greedy": 950.0,
+                  "plan": "dump", "auto": True, "list": 760, "qty": 3},
+        }
+        out = build_userscript(price_map, {}, cfg={"dumpUndercutPct": 7.0})
+        start = out.index("var PRICE_MAP = ") + len("var PRICE_MAP = ")
+        decoded = json.loads(out[start:out.index(";", start)])
+        self.assertEqual((decoded["641"]["plan"], decoded["641"]["list"], decoded["641"]["qty"]), ("dump", 760, 3))
+        self.assertIn('"dumpUndercutPct": 7.0', out)
+        self.assertIn('"topMinQuality": 50.0', out)
+        self.assertIn('plan === "keep" || plan === "shop"', out)
+
+
 if __name__ == "__main__":
     unittest.main()

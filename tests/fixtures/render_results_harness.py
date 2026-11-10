@@ -97,7 +97,10 @@ analysis = {
     "unmatched": [("Some Unknown Item", 2)],
     "df_market": pd.DataFrame([{"item_id": 641, "item_name": "Kevlar Gloves", "price_1": 900, "amount_1": 5}]),
     "df_long": pd.DataFrame([{"item_id": 641, "item_name": "Kevlar Gloves", "price": 900.0, "quantity": 5.0}]),
-    "profiles": {},
+    "profiles": {
+        "641": {"id": 641, "name": "Kevlar Gloves", "type": "Armor", "sell_price": 1000, "vendor": "Bits 'n' Bobs"},
+        "26": {"id": 26, "name": "AK-47", "type": "Weapon", "category": "Primary"},
+    },
     "entries": [InventoryEntry(item_id=26, name="AK-47", amount=1, equipped=False, uid="123")],
     "uid_stats": {"123": {"damage": 55.0, "accuracy": 48.0, "armor": None, "quality": 30.0}},
 }

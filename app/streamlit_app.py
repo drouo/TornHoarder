@@ -1,5 +1,6 @@
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +17,8 @@ if str(SRC_DIR) not in sys.path:
 from app.paths import DICT_PATH, PROFILES_PATH
 from app.ui.results import render_results
 from tma.catalog import refresh_catalog_if_stale
-from tma.config import load_api_key, save_api_key, clear_api_key
+from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
+from tma.sell_plan import SellRules
 from tma.http_client import TokenBucket, session_for_requests
 from tma.inventory import (
     fetch_inventory,
@@ -92,10 +94,9 @@ with st.expander("How it works"):
 Alternatively, switch the source to **API inventory**: the app pulls
 your inventory straight from Torn (`user/inventory`). That needs a
 **Limited-access** API key with the `user` → `inventory` permission.
-Use the scope selector to pull only the categories you care about
-(e.g. Weapons + Armor) and cut API usage. **Custom…** lets you tick
-only the categories you want — the fastest way to test armour/weapons
-when a full weapons scan is too slow.
+**Sell categories** is the list of what you're willing to sell: only those
+categories are pulled and priced, and everything else (Xanax, medical,
+boosters, cans, books, ...) is never listed. Equipped gear is always skipped.
 
 **Single item** (in the `Inventory source` selector) prices just that one
 item: type a name or ID and it looks up how many you actually own (one
@@ -114,9 +115,13 @@ run, click it again and Tampermonkey shows an instant update prompt with
 the new prices. On the Add Listing page it fills each row's price, adds a
 premium for high-quality weapons/armor, and highlights them.
 
-For a pile of ordinary items you just want off your hands, use the
-**Bulk sell** tab — pick a discount (e.g. 75% of Fair price), uncheck
-anything you'd rather keep at full price, and copy the listing text.
+The **Sell plan** tab gives every item a plan automatically: **Dump**
+cheap junk a few % under the cheapest listing so it clears fast,
+**Competitive** (cheapest − $1) for anything worth $20k+ or a big stack,
+**Top dollar** for high-roll weapons/armor and valuable items with few
+listings, and **Shop** when a city shop pays more than the market after
+Torn's 5% sales tax. Change any item's plan (or set it to **Keep**) and
+it's remembered next run; the autofill script lists items by their plan.
 
 ### What the app does
 
@@ -172,23 +177,23 @@ if source == "API inventory":
     )
     raw = None
 
-    scope = st.radio(
-        "Inventory scope",
-        ("Everything", "Weapons + Armor", "Custom…"),
-        horizontal=True,
-        key="inventory_scope",
-        help="Pulling fewer categories means fewer market calls and less data transfer.",
+    # Sell categories are an allowlist: only these are pulled and priced, so
+    # anything you'd never sell (Xanax, medical, boosters, ...) never even
+    # reaches the autofill script. Saved with the rest of the sell rules.
+    saved_rules, saved_overrides = load_sell_prefs()
+    rules_now = SellRules.from_dict(saved_rules)
+    chosen = st.multiselect(
+        "Sell categories",
+        INVENTORY_CATEGORIES,
+        default=[c for c in rules_now.sell_categories if c in INVENTORY_CATEGORIES],
+        format_func=lambda c: CATEGORY_LABELS.get(c, c),
+        key="sell_categories",
+        help="Only these categories are pulled and priced; everything else is never listed. "
+        "Equipped items are always skipped. Remembered on this computer.",
     )
-    pull_categories: tuple[str, ...] | None = None
-    if scope == "Weapons + Armor":
-        pull_categories = ("Primary", "Secondary", "Melee", "Temporary", "Defensive")
-    elif scope == "Custom…":
-        chosen = st.multiselect(
-            "Categories to pull",
-            [(CATEGORY_LABELS.get(c, c), c) for c in INVENTORY_CATEGORIES],
-            key="inventory_categories",
-        )
-        pull_categories = tuple(chosen) or None
+    if tuple(chosen) != rules_now.sell_categories:
+        save_sell_prefs(replace(rules_now, sell_categories=tuple(chosen)).to_dict(), saved_overrides)
+    pull_categories: tuple[str, ...] | None = tuple(chosen)
 elif source == "Paste items":
     raw = st.text_area(
         "Paste your items",
@@ -247,6 +252,9 @@ if submitted:
         st.stop()
     if source == "Paste items" and (not raw or not raw.strip()):
         st.error("Listings text is empty.")
+        st.stop()
+    if source == "API inventory" and not pull_categories:
+        st.error("Pick at least one sell category.")
         st.stop()
     if source == "Single item" and not st.session_state.get("single_query", "").strip():
         st.error("Enter an item name or ID to check.")

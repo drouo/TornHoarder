@@ -28,7 +28,7 @@ class RenderResultsSmokeTest(unittest.TestCase):
         tab_labels = {t.proto.label for t in at.tabs}
         self.assertEqual(
             tab_labels,
-            {"Pricing table", "Bulk sell", "Special finds", "Autofill script", "Diagnostics"},
+            {"Sell plan", "Pricing table", "Special finds", "Autofill script", "Diagnostics"},
         )
 
 

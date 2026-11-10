@@ -30,15 +30,20 @@ class InputFormConditionalWidgetsTest(unittest.TestCase):
         self.assertTrue(any(t.key == "single_query" for t in at.text_input))
         self.assertTrue(any(t.key == "single_uid" for t in at.text_input))
 
-    def test_selecting_custom_scope_reveals_category_picker_without_submitting(self):
+    def test_sell_categories_default_to_weapons_armor_and_loot_and_are_saved(self):
+        from tma import config
+        from tma.sell_plan import DEFAULT_SELL_CATEGORIES
+
         at = AppTest.from_file(str(APP))
         at.run(timeout=30)
+        [picker] = [m for m in at.multiselect if m.key == "sell_categories"]
+        self.assertEqual(tuple(picker.value), DEFAULT_SELL_CATEGORIES)
+        self.assertNotIn("Drug", picker.value)
+        self.assertNotIn("Medical", picker.value)
 
-        [scope_radio] = [r for r in at.radio if r.key == "inventory_scope"]
-        scope_radio.set_value("Custom…").run(timeout=30)
+        picker.set_value(["Primary", "Defensive"]).run(timeout=30)
         self.assertEqual(list(at.exception), [])
-
-        self.assertTrue(any(m.key == "inventory_categories" for m in at.multiselect))
+        self.assertEqual(config.load_sell_prefs()[0]["sell_categories"], ["Primary", "Defensive"])
 
 
 if __name__ == "__main__":

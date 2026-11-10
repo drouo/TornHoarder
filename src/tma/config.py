@@ -28,3 +28,17 @@ def clear_api_key() -> None:
     cfg = load_config()
     cfg.pop("api_key", None)
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def load_sell_prefs() -> tuple[dict, dict[int, str]]:
+    """(sell rules dict, {item_id: plan} overrides) saved from the Sell plan tab."""
+    cfg = load_config()
+    overrides = {int(k): str(v) for k, v in (cfg.get("sell_overrides") or {}).items()}
+    return dict(cfg.get("sell_rules") or {}), overrides
+
+
+def save_sell_prefs(rules: dict, overrides: dict[int, str]) -> None:
+    cfg = load_config()
+    cfg["sell_rules"] = rules
+    cfg["sell_overrides"] = {str(k): v for k, v in sorted(overrides.items())}
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")

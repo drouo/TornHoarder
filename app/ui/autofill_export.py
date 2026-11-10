@@ -34,10 +34,12 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
     return True, url
 
 
-def render_autofill_export(an: dict, ctx: dict) -> None:
+def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
     df_summary = an["df_summary"]
     payload_by_item = ctx["payload_by_item"]
     profiles = an.get("profiles") or {}
+    item_plans = plan_ctx["item_plans"]
+    rules = plan_ctx["rules"]
 
     price_map = {}
     for _, r in df_summary.iterrows():
@@ -67,9 +69,14 @@ def render_autofill_export(an: dict, ctx: dict) -> None:
                 "coef": fit.get("coef") or {},
                 "base": fit.get("base") or {},
             }
+        lu.update(item_plans.get(int(iid)) or {})
         price_map[int(iid)] = lu
 
-    userjs = build_userscript(price_map, base_stats_map(profiles))
+    userjs = build_userscript(
+        price_map,
+        base_stats_map(profiles),
+        cfg={"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality},
+    )
     write_ok = True
     try:
         AUTOFILL_PATH.write_text(userjs, encoding="utf-8")
@@ -106,9 +113,9 @@ def render_autofill_export(an: dict, ctx: dict) -> None:
     with st.expander("About the autofill script"):
         st.markdown(
             f"Installs in [Tampermonkey](https://www.tampermonkey.net/). On the Torn **Add Listing** "
-            f"page it fills each row's price from your suggested prices. For weapons/armor it reads the "
-            f"row's stat rolls, computes the copy's quality from the app's fitted market model, and prices "
-            f"it on the item's quality curve (no extra premium — the curve already reflects quality). "
-            f"Copies with quality **≥ {PREMIUM_THRESHOLD:.0f}%** are highlighted. "
-            "You can change the price basis and thresholds in the `CFG` block at the top of the script."
+            f"page it fills each row's price and quantity from the **Sell plan** tab, and leaves Shop / Keep "
+            f"rows blank. For weapons/armor it reads the row's stat rolls, computes the copy's quality from "
+            f"the app's fitted market model, and prices it on the item's quality curve for that plan; copies "
+            f"with quality **≥ {rules.top_min_quality:.0f}** are listed at Top dollar unless you chose a plan "
+            f"yourself. Copies with quality **≥ {PREMIUM_THRESHOLD:.0f}%** are highlighted."
         )

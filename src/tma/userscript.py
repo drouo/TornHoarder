@@ -7,7 +7,7 @@ TEMPLATE = """\
 // ==UserScript==
 // @name         TMA Autofill - Torn Item Market
 // @namespace    torn-market-analyzer
-// @version      0.2.2
+// @version      0.3.3
 // @description  Fills Add Listing prices from the TMA app using the market's quality curve for weapons/armor.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
 // @updateURL    http://127.0.0.1:9999/tma_autofill.user.js
@@ -39,8 +39,9 @@ TEMPLATE = """\
 
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
-        : "0.2.2";
-    var STATS = { rows: 0, filled: 0, skipped: 0, unmatched: 0 };
+        : "0.3.3";
+    var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
+    var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
     var UNKNOWN = {};
     var HUD = null;
     var HUD_TEXT = "";
@@ -65,7 +66,7 @@ TEMPLATE = """\
         var text =
             "TMA " + VER + " | items " + Object.keys(PRICE_MAP).length +
             " | rows " + STATS.rows + " | filled " + STATS.filled +
-            " | skipped " + STATS.skipped + " | unmatched " + STATS.unmatched;
+            " | skipped " + STATS.skipped + " | shop/keep " + STATS.held + " | unmatched " + STATS.unmatched;
         if (text !== HUD_TEXT) {
             ensureHud().textContent = text;
             HUD_TEXT = text;
@@ -235,12 +236,45 @@ TEMPLATE = """\
             qualitySource = "base";
         }
 
+        // Sell plan from the app; an automatic plan is bumped to "top" for a
+        // high-roll copy, since the app can't tell which row is which copy.
+        var plan = entry.plan || null;
+        if (plan && plan !== "keep" && entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
+            plan = "top";
+        }
+        if (plan === "keep" || plan === "shop") {
+            STATS.held += 1;
+            container.setAttribute("data-tma-skipped", "1");
+            container.style.outline = "1px dashed #888";
+            paintHud();
+            return;
+        }
+        var basis = plan ? PLAN_BASIS[plan] : CFG.priceBasis;
+
         var curvePrice = entry.curve && quality != null
-            ? interpolate(entry.curve, quality, CFG.priceBasis)
+            ? interpolate(entry.curve, quality, basis)
             : null;
-        var price = curvePrice != null && curvePrice > 0 ? curvePrice : (entry[CFG.priceBasis] || null);
-        if (price != null && quality != null && quality >= CFG.premiumThreshold && curvePrice == null) {
+        if (curvePrice != null && plan === "dump") {
+            curvePrice = Math.max(Math.round(curvePrice * (1 - CFG.dumpUndercutPct / 100)), 1);
+        }
+        var fallback = entry.list != null ? entry.list : (entry[basis] || null);
+        var price = curvePrice != null && curvePrice > 0 ? curvePrice : fallback;
+        if (!plan && price != null && quality != null && quality >= CFG.premiumThreshold && curvePrice == null) {
             price = Math.max(price, Math.round(price * premiumFor(quality)));
+        }
+        // Same guards as the app: never list under what a shop pays after
+        // tax, and leave anything under half Torn's reference price for a
+        // manual look (a stray $1 listing can drag a curve bucket down).
+        if (price != null && entry.shopMin) {
+            price = Math.max(price, entry.shopMin);
+        }
+        if (price != null && entry.refMin && price < entry.refMin) {
+            console.log("[TMA] held " + entry.name + " @" + price + ": under refMin " + entry.refMin);
+            STATS.held += 1;
+            container.setAttribute("data-tma-skipped", "1");
+            container.style.outline = "2px dashed #e53935";
+            paintHud();
+            return;
         }
         if (price != null && quality != null && quality >= CFG.premiumThreshold) {
             container.style.outline = "2px solid #ffd97a";
@@ -257,7 +291,7 @@ TEMPLATE = """\
             container.setAttribute("data-tma-skipped", "1");
         }
         if (price != null && CFG.fillQty && inputs.qty && !inputs.qty.value) {
-            inputs.qty.value = "1";
+            inputs.qty.value = String(entry.qty || 1);
         }
         paintHud();
         window.__TMA__ = { version: VER, items: Object.keys(PRICE_MAP).length, stats: STATS };
@@ -306,6 +340,8 @@ DEFAULT_CFG: Dict[str, object] = {
     "fillQty": True,
     "premiumThreshold": 50.0,
     "premiumMaxMult": 3.0,
+    "dumpUndercutPct": 5.0,
+    "topMinQuality": 50.0,
     "scanMs": 1500,
 }
 

@@ -59,6 +59,22 @@ All prices are computed from the **cleaned** order book:
 - **Fast-sell price**
   - **$1 under the cheapest clean listing**: buyers take the cheapest listing first
 
+### 5) Sell plan
+
+Only items in your **Sell categories** are pulled and priced; everything else is never listed. The default is unequipped weapons (Primary, Secondary, Melee) and armor (Defensive), plus general loot (Clothing, Collectible, Jewelry, Other, Tool, Material, Car) and museum items (Plushie, Flower, Artifact). Drugs, medical, boosters, energy drinks, supply packs, books and temporary weapons are kept unless you add them.
+
+Each item in a sell category gets a plan automatically. The **Sell plan** tab lets you change it, and changes are saved in `~/.tma_config.json`:
+
+| Plan | When (defaults) | List price |
+|---|---|---|
+| **Dump** | worth < $20k each and the stack < $1M | 5% under the cheapest listing |
+| **Competitive** | worth ≥ $20k each, or a stack ≥ $1M | cheapest listing − $1 |
+| **Top dollar** | weapon/armor copy with quality ≥ 50, or ≥ $20k with < 20 listings | Greedy (upper quartile) |
+| **Shop** | a city shop pays ≥ the market price after Torn's 5% sales tax | the shop's price, no listing |
+| **Keep** | only when you choose it | never listed |
+
+The thresholds can be changed under **Rules**. The autofill script fills each row from its plan and leaves Shop and Keep rows blank. The item catalog (reference and shop prices) re-downloads from `torn/items` once it's more than 24h old.
+
 
 
 ## Project structure
@@ -70,6 +86,7 @@ torn-market-analyzer/
 │  ├─ streamlit_app.py      # input form + pipeline orchestration
 │  ├─ paths.py               # shared path constants
 │  └─ ui/                    # one results tab per module
+│     ├─ sell_plan.py        # per-item Dump/Competitive/Top/Shop/Keep plans
 │     ├─ pricing_table.py    # price suggestions + listing-text builder
 │     ├─ special_finds.py    # copies priced above the item's standard curve
 │     ├─ autofill_export.py  # Tampermonkey userscript generation/download
@@ -81,6 +98,7 @@ torn-market-analyzer/
 │     ├─ inventory_matcher.py
 │     ├─ market_fetch.py     # item-market listings fetch (concurrent)
 │     ├─ market_enrichment.py
+│     ├─ sell_plan.py        # sell-plan classifier (pure logic)
 │     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
 │     ├─ item_stats.py       # stat-value model / quality-curve fitting
 │     ├─ quality.py

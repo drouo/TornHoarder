@@ -15,6 +15,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from app.paths import DICT_PATH, PROFILES_PATH
+from app.ui import autofill_export
 from app.ui.results import render_results
 from tma.catalog import refresh_catalog_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
@@ -50,6 +51,10 @@ def load_stat_layer(profiles_mtime: float) -> tuple[dict, StatValueModel]:
 
 
 st.set_page_config(page_title="Torn Market Analyzer", layout="centered")
+
+# Serve the autofill script for Tampermonkey's update checks from app start,
+# not only once a finished run has rendered the Autofill tab.
+autofill_export._ensure_update_server()
 
 if "api_key" not in st.session_state:
     st.session_state["api_key"] = load_api_key()

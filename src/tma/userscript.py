@@ -10,8 +10,8 @@ TEMPLATE = """\
 // @version      0.2.2
 // @description  Fills Add Listing prices from the TMA app using the market's quality curve for weapons/armor.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
-// @updateURL    http://localhost:9999/tma_autofill.user.js
-// @downloadURL  http://localhost:9999/tma_autofill.user.js
+// @updateURL    http://127.0.0.1:9999/tma_autofill.user.js
+// @downloadURL  http://127.0.0.1:9999/tma_autofill.user.js
 // @run-at       document-idle
 // ==/UserScript==
 

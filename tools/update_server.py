@@ -3,7 +3,7 @@
 Usage:
     python tools/update_server.py [--port 9999]
 
-Tampermonkey @updateURL: http://localhost:9999/tma_autofill.user.js
+Tampermonkey @updateURL: http://127.0.0.1:9999/tma_autofill.user.js
 
 Note: the Streamlit app now starts this same server automatically inside
 its own process (see app/ui/autofill_export.py) as soon as the Autofill

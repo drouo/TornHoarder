@@ -27,3 +27,15 @@ def isolate_local_config(tmp_path, monkeypatch):
     from tma import config
 
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / ".tma_config.json")
+
+
+@pytest.fixture(autouse=True)
+def isolate_autofill_output(tmp_path, monkeypatch):
+    """The Autofill tab writes data/tma_autofill.user.js — the very file the
+    update server hands to Tampermonkey — and starts that server on :9999.
+    Rendering it from fixture data used to overwrite the user's real script
+    with the two test items, so tests write to tmp and never bind the port."""
+    from app.ui import autofill_export
+
+    monkeypatch.setattr(autofill_export, "AUTOFILL_PATH", tmp_path / "tma_autofill.user.js")
+    monkeypatch.setattr(autofill_export, "_ensure_update_server", lambda *a, **k: (False, "http://test/"))

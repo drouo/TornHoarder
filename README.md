@@ -84,6 +84,7 @@ torn-market-analyzer/
 │     ├─ inventory_matcher.py
 │     ├─ market_fetch.py     # item-market listings fetch (concurrent)
 │     ├─ market_enrichment.py
+│     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
 │     ├─ item_stats.py       # stat-value model / quality-curve fitting
 │     ├─ quality.py
 │     ├─ userscript.py

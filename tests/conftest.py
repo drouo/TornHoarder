@@ -30,6 +30,17 @@ def isolate_local_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_catalog_refresh(monkeypatch):
+    """The app refreshes data/ from torn/items when the catalog is stale. Under
+    test that would be a network call — or, with a mocked session, overwrite
+    the real data/ files — so the app-facing entry point is a no-op here.
+    tests/test_catalog.py exercises the real function against tmp paths."""
+    from tma import catalog
+
+    monkeypatch.setattr(catalog, "refresh_catalog_if_stale", lambda *a, **k: (False, None))
+
+
+@pytest.fixture(autouse=True)
 def isolate_autofill_output(tmp_path, monkeypatch):
     """The Autofill tab writes data/tma_autofill.user.js — the very file the
     update server hands to Tampermonkey — and starts that server on :9999.

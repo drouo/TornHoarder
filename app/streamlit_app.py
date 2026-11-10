@@ -15,6 +15,7 @@ if str(SRC_DIR) not in sys.path:
 
 from app.paths import DICT_PATH, PROFILES_PATH
 from app.ui.results import render_results
+from tma.catalog import refresh_catalog_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key
 from tma.http_client import TokenBucket, session_for_requests
 from tma.inventory import (
@@ -38,7 +39,8 @@ MARKET_PHASE_TIMEOUT_S = 1200.0
 
 
 @st.cache_data
-def load_stat_layer() -> tuple[dict, StatValueModel]:
+def load_stat_layer(profiles_mtime: float) -> tuple[dict, StatValueModel]:
+    # profiles_mtime only keys the cache, so a catalog refresh refits the model.
     profiles = load_profiles(PROFILES_PATH)
     model = StatValueModel()
     model.fit(profiles)
@@ -267,6 +269,13 @@ if submitted:
     bucket = TokenBucket(RATE_LIMIT_PER_MIN)
     clock_run = time.monotonic()
     run_box = st.status("Preparing run…", expanded=True)
+
+    with run_box:
+        refreshed, cat_err = refresh_catalog_if_stale(sess, api_key, DICT_PATH, PROFILES_PATH)
+        if refreshed:
+            st.caption("Refreshed the item catalog (reference and shop prices) from Torn.")
+        elif cat_err:
+            st.caption(f"Couldn't refresh the item catalog ({cat_err}); using the saved copy.")
 
     if source == "API inventory":
         planned = len(pull_categories) if pull_categories is not None else len(INVENTORY_CATEGORIES)
@@ -510,7 +519,7 @@ if submitted:
         df_enriched = enrich_all_items(df_long)
         df_summary = build_summary_from_enriched(df_enriched).sort_values("item_name").reset_index(drop=True)
 
-        profiles, stat_model = load_stat_layer()
+        profiles, stat_model = load_stat_layer(PROFILES_PATH.stat().st_mtime)
         warnings = stat_warnings(stat_model, profiles, df_summary)
 
         stat_cols = []

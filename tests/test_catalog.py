@@ -75,11 +75,18 @@ class RefreshTest(unittest.TestCase):
             self.assertEqual(list(csv.DictReader(f)), [{"key": "Hammer", "id": "1"}])
 
     def test_fresh_catalog_is_left_alone(self):
-        self.prof_path.write_text("{}", encoding="utf-8")
+        self.prof_path.write_text('{"1": {"crime_hint": false}}', encoding="utf-8")
         self.dict_path.write_text("key,id\n", encoding="utf-8")
         sess = FakeSession({"items": [HAMMER]})
         self.assertEqual(refresh_catalog_if_stale(sess, "k", self.dict_path, self.prof_path), (False, None))
         self.assertEqual(sess.calls, 0)
+
+    def test_catalog_missing_a_newer_field_is_refreshed(self):
+        # Written before crime_hint existed: fresh by age, but stale by shape.
+        self.prof_path.write_text('{"1": {"name": "Hammer"}}', encoding="utf-8")
+        self.dict_path.write_text("key,id\n", encoding="utf-8")
+        refreshed, _ = refresh_catalog_if_stale(FakeSession({"items": [HAMMER]}), "k", self.dict_path, self.prof_path)
+        self.assertTrue(refreshed)
 
     def test_stale_catalog_is_refreshed(self):
         self.prof_path.write_text("{}", encoding="utf-8")

@@ -42,3 +42,14 @@ def save_sell_prefs(rules: dict, overrides: dict[int, str]) -> None:
     cfg["sell_rules"] = rules
     cfg["sell_overrides"] = {str(k): v for k, v in sorted(overrides.items())}
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def load_reserves() -> dict[int, int]:
+    """{item_id: how many to keep} set by hand on the Sell plan tab."""
+    return {int(k): int(v) for k, v in (load_config().get("reserves") or {}).items()}
+
+
+def save_reserves(reserves: dict[int, int]) -> None:
+    cfg = load_config()
+    cfg["reserves"] = {str(k): int(v) for k, v in sorted(reserves.items())}
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")

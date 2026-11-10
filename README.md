@@ -85,6 +85,17 @@ The thresholds can be changed under **Rules**. The autofill script fills each ro
 
 
 
+### Keeping what you need
+
+Only the surplus is ever sold. The **Keeping** column on the Sell plan tab shows how many of each item stay in your inventory; type a number there to set it by hand. The defaults:
+
+- **Organized Crime items** come from Torn's `torn/organizedcrimes` list. Keep 1 of each reusable tool (Lockpicks, Jemmy, Wire Cutters…) and 3 of each item a crime uses up (ID Badge, Zip Ties, C4…).
+- **Other crime items** are ones whose in-game effect says a crime uses them (Forgery, Disposal, Graffiti, Arson…). Keep 1.
+- **Clothing and Collectibles**: keep 1 of each, so only duplicates are sold.
+- **Weapons and armor**: the copies kept are your best by quality.
+
+Before anything sells, the shop run lists each item × quantity × price above its button (click a line to leave it out), and Torn asks you to confirm. On Add Listing, click the status box to see every row it filled and every row it held, and why.
+
 ### 6) Shop run
 
 Shop-plan items are sold to city shops with one button. **Start shop run →** on the Sell plan tab opens the first shop. On every shop page the userscript puts one green button in the same spot:

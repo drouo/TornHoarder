@@ -73,18 +73,52 @@ class SellRules:
     top_min_quality: float = 50.0
     thin_market_listings: int = 20
     sell_categories: tuple[str, ...] = DEFAULT_SELL_CATEGORIES
+    # How many to keep before anything is sold (see reserve_for).
+    keep_one_categories: tuple[str, ...] = ("Clothing", "Collectible")
+    oc_tool_keep: int = 1
+    oc_consumable_keep: int = 3
+    crime_hint_keep: int = 1
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["sell_categories"] = list(self.sell_categories)
+        d["keep_one_categories"] = list(self.keep_one_categories)
         return d
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "SellRules":
         known = {k: v for k, v in (d or {}).items() if k in cls.__dataclass_fields__}
-        if "sell_categories" in known:
-            known["sell_categories"] = tuple(known["sell_categories"])
+        for key in ("sell_categories", "keep_one_categories"):
+            if key in known:
+                known[key] = tuple(known[key])
         return cls(**known)
+
+
+def reserve_for(
+    item_id: int,
+    profile: Optional[dict],
+    category: Optional[str],
+    rules: SellRules,
+    oc_items: Optional[dict] = None,
+    override: Optional[int] = None,
+) -> tuple[int, str]:
+    """How many of an item to keep, and why. Your per-item number wins; otherwise the largest of:
+    Organized Crime items (reusable tools vs consumed items), items whose description says a
+    crime uses them, and keep-one categories (e.g. one of every Clothing item)."""
+    if override is not None:
+        return max(int(override), 0), "your choice"
+    keep, why = 0, ""
+    oc = (oc_items or {}).get(str(item_id))
+    if oc:
+        n = rules.oc_consumable_keep if oc.get("consumed") else rules.oc_tool_keep
+        crimes = oc.get("crimes") or []
+        if n > keep:
+            keep, why = n, "needed for OC: " + ", ".join(crimes[:2]) + ("…" if len(crimes) > 2 else "")
+    if (profile or {}).get("crime_hint") and rules.crime_hint_keep > keep:
+        keep, why = rules.crime_hint_keep, "used in crimes"
+    if category in rules.keep_one_categories and keep < 1:
+        keep, why = 1, f"keep 1 of each {category}"
+    return keep, why
 
 
 @dataclass(frozen=True)

@@ -14,12 +14,25 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from tma.config import load_sell_prefs, save_sell_prefs
+from dataclasses import replace
+
+from tma.config import load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
+from tma.crime_items import load_oc_items
 from tma.inventory import inventory_category_for_profile
-from tma.sell_plan import LABEL_TO_PLAN, MARKET_FEE, PLAN_LABELS, PLANS, Decision, SellRules, decide, price_guards
+from tma.sell_plan import (
+    LABEL_TO_PLAN,
+    MARKET_FEE,
+    PLAN_LABELS,
+    PLANS,
+    Decision,
+    SellRules,
+    decide,
+    price_guards,
+    reserve_for,
+)
 from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
 
-from ..paths import SHOP_BUYS_PATH
+from ..paths import OC_ITEMS_PATH, SHOP_BUYS_PATH
 
 _EDITOR_KEY = "sell_plan_editor"
 
@@ -41,16 +54,40 @@ def plan_rows(
     rules: SellRules,
     overrides: dict[int, str],
     known: Optional[dict] = None,
+    oc_items: Optional[dict] = None,
+    reserves: Optional[dict[int, int]] = None,
 ) -> list[dict]:
-    """One row per pricing-table row (stackables combined, one per weapon/armor copy)."""
+    """One row per pricing-table row (stackables combined, one per weapon/armor copy).
+
+    Reserves come first: a stack sells only what's above its keep number,
+    and for weapon/armor the best copies (by quality) are the ones kept.
+    """
+    reserves = reserves or {}
+    keep_by_item: dict[int, tuple[int, str]] = {}
+    for ro in rows_out:
+        iid = int(ro["item_id"])
+        if iid not in keep_by_item:
+            prof = profiles.get(str(iid)) or {}
+            keep_by_item[iid] = reserve_for(
+                iid, prof, inventory_category_for_profile(prof), rules, oc_items, reserves.get(iid)
+            )
+    kept_copies: set[int] = set()
+    for iid, (n, _) in keep_by_item.items():
+        copies = [i for i, ro in enumerate(rows_out) if int(ro["item_id"]) == iid and ro.get("is_stat")]
+        copies.sort(key=lambda i: real_q_by_idx.get(i) if real_q_by_idx.get(i) is not None else float("-inf"), reverse=True)
+        kept_copies.update(copies[:n])
+
     out = []
     for idx, ro in enumerate(rows_out):
         iid = int(ro["item_id"])
         prof = profiles.get(str(iid)) or {}
         summ = summary_by_id.get(iid) or {}
         qty = int(_num(ro.get("My quantity")) or 0)
+        reserve, keep_why = keep_by_item[iid]
+        keeping = (1 if idx in kept_copies else 0) if ro.get("is_stat") else min(reserve, qty)
+        selling = qty - keeping
         kwargs = dict(
-            qty=qty,
+            qty=selling,
             fast=_num(ro.get("Fast-sell price")),
             fair=_num(ro.get("Fair price")),
             greedy=_num(ro.get("Greedy price")),
@@ -63,6 +100,13 @@ def plan_rows(
         )
         auto: Decision = decide(**kwargs)
         d: Decision = decide(**kwargs, override=overrides.get(iid)) if iid in overrides else auto
+        why = d.reason
+        if keeping and not selling:
+            what = "your best copy" if ro.get("is_stat") else f"all {qty:,}"
+            auto = d = Decision("keep", f"keeping {what}: {keep_why}", None, 0.0, True)
+            why = d.reason
+        elif keeping:
+            why = f"{d.reason} · keeping {keeping:,} ({keep_why})"
         out.append(
             {
                 "item_id": iid,
@@ -71,8 +115,11 @@ def plan_rows(
                 "Plan": PLAN_LABELS[d.plan],
                 "Item": ro["Item"],
                 "Qty": qty,
+                "Keeping": keeping,
+                "Selling": selling,
+                "quality": real_q_by_idx.get(idx) if ro.get("is_stat") else None,
                 "List price": d.price,
-                "Why": d.reason,
+                "Why": why,
                 "Floor": _num(summ.get("floor_price")),
                 "Fair": kwargs["fair"],
                 "Shop pays": shop_price_for(prof, iid, known),
@@ -132,12 +179,30 @@ def item_plans(
             # (do the shop run first): list it with its market plan instead.
             fb = decide(**kwargs, shop_price=None, override=None if overrides.get(iid) == "shop" else overrides.get(iid))
             plans[iid]["fallback"] = {"plan": fb.plan, "list": fb.price, "refMin": ref_min if fb.auto else None}
-    for _, row in edited.iterrows():
-        iid = int(row["item_id"])
-        if iid in plans and not row["is_stat"] and plans[iid]["plan"] != "shop":
-            price = _num(row.get("List price"))
-            plans[iid]["list"] = int(price) if price else None
-            plans[iid]["qty"] = int(row["Qty"])
+    for iid, rows in edited.groupby("item_id"):
+        iid = int(iid)
+        if iid not in plans:
+            continue
+        entry = plans[iid]
+        if not bool(rows["is_stat"].iloc[0]):
+            row = rows.iloc[0]
+            if entry["plan"] != "shop":
+                price = _num(row.get("List price"))
+                entry["list"] = int(price) if price else None
+            # Only the surplus is ever listed or sold; the reserve stays put.
+            entry["qty"] = int(row["Selling"])
+            if not entry["qty"]:
+                entry["plan"] = "keep"
+            continue
+        kept = rows[rows["Keeping"] > 0]
+        if len(kept) == len(rows):
+            entry["plan"] = "keep"
+        elif len(kept):
+            # The Add Listing page shows rolls, not copy ids: hold every row at
+            # least as good as the worst copy we're keeping (unknown -> hold all).
+            qualities = [_num(q) for q in kept["quality"]]
+            entry["keepMinQuality"] = None if None in qualities else float(min(qualities))
+            entry["keepAll"] = None in qualities
     return plans
 
 
@@ -184,11 +249,38 @@ def _render_rules(saved: dict) -> SellRules:
                 "Top dollar: competitive items with fewer listings than", 1, 100, int(base.thin_market_listings), 1,
                 key="rule_thin",
             )
+        st.markdown("**Always keep** (only the surplus is ever sold)")
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            oc_tool = st.number_input("OC tools (reusable)", 0, 50, int(base.oc_tool_keep), 1, key="rule_oc_tool")
+        with k2:
+            oc_used = st.number_input("OC items used up per run", 0, 50, int(base.oc_consumable_keep), 1, key="rule_oc_used")
+        with k3:
+            hint = st.number_input("Other crime items", 0, 50, int(base.crime_hint_keep), 1, key="rule_crime_hint")
+        keep_one = st.multiselect(
+            "Keep 1 of every item in",
+            sorted(set(base.sell_categories) | set(base.keep_one_categories)),
+            default=list(base.keep_one_categories),
+            key="rule_keep_one",
+        )
         st.caption(
             f"Market proceeds are after Torn's {MARKET_FEE:.0%} item-market sales tax. Dump/Competitive items switch "
-            "to **Shop** automatically when a city shop pays at least that much."
+            "to **Shop** automatically when a city shop pays at least that much. OC items come from Torn's "
+            "organized-crimes list; other crime items from their in-game description. Type a number in "
+            "**Keeping** to set any item by hand."
         )
-    return SellRules(float(undercut), float(unit), float(stack), float(quality), int(thin), base.sell_categories)
+    return replace(
+        base,
+        dump_undercut_pct=float(undercut),
+        competitive_min_unit=float(unit),
+        competitive_min_stack=float(stack),
+        top_min_quality=float(quality),
+        thin_market_listings=int(thin),
+        keep_one_categories=tuple(keep_one),
+        oc_tool_keep=int(oc_tool),
+        oc_consumable_keep=int(oc_used),
+        crime_hint_keep=int(hint),
+    )
 
 
 def render_sell_plan(an: dict, ctx: dict) -> dict:
@@ -198,27 +290,35 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     summary_by_id = {int(r["item_id"]): r for r in an["df_summary"].to_dict("records")}
     profiles = an.get("profiles") or {}
     known = load_shop_knowledge(SHOP_BUYS_PATH)
-    rows = plan_rows(ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known)
+    oc_items = load_oc_items(OC_ITEMS_PATH)
+    reserves = load_reserves()
+    rows = plan_rows(
+        ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, reserves
+    )
     # data_editor stores edits by row position, so the order must not depend
     # on the plan (which edits change) — stack value doesn't.
     df = pd.DataFrame(rows)
     df = df.sort_values(["Stack value", "Item"], ascending=[False, True], kind="stable").reset_index(drop=True)
 
     st.caption(
-        "Each item gets a plan automatically. Change **Plan** to override it (remembered next run, and it "
-        "applies to every copy of that item). **List price** is editable for plain items; weapon/armor "
-        "copies are re-priced from their rolls by the autofill script."
+        "Each item gets a plan automatically. Change **Plan** to override it, or type how many to keep in "
+        "**Keeping** (both remembered next run, for every copy of that item). Only **Selling** is ever listed or "
+        "sold. **List price** is editable for plain items; weapon/armor copies are re-priced from their rolls."
     )
     edited = st.data_editor(
         df,
         width="stretch",
         hide_index=True,
         key=_EDITOR_KEY,
-        column_order=("Plan", "Item", "Qty", "List price", "Est. proceeds", "Why", "Floor", "Fair", "Shop pays"),
+        column_order=(
+            "Plan", "Item", "Qty", "Keeping", "Selling", "List price", "Est. proceeds", "Why", "Floor", "Fair", "Shop pays"
+        ),
         column_config={
             "Plan": st.column_config.SelectboxColumn(options=[PLAN_LABELS[p] for p in PLANS], required=True),
             "Item": st.column_config.Column(disabled=True),
             "Qty": st.column_config.NumberColumn(format="%,.0f", disabled=True),
+            "Keeping": st.column_config.NumberColumn(min_value=0, step=1, format="%,.0f", help="How many you keep. Type a number to set it by hand."),
+            "Selling": st.column_config.NumberColumn(format="%,.0f", disabled=True),
             "List price": st.column_config.NumberColumn(min_value=1, step=1, format="%,.0f"),
             "Est. proceeds": st.column_config.NumberColumn(format="%,.0f", disabled=True),
             "Why": st.column_config.Column(disabled=True),
@@ -229,10 +329,13 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     )
 
     new_overrides = overrides_from_edit(df, edited, overrides)
+    new_reserves = reserves_from_edit(df, edited, reserves)
+    if new_reserves != reserves:
+        save_reserves(new_reserves)
     if new_overrides != overrides or rules.to_dict() != SellRules.from_dict(saved_rules).to_dict():
         save_sell_prefs(rules.to_dict(), new_overrides)
-        if new_overrides != overrides:
-            st.rerun()
+    if new_overrides != overrides or new_reserves != reserves:
+        st.rerun()
 
     _render_totals(edited)
     shop_run = build_shop_run(shop_rows(edited), profiles, known)
@@ -246,11 +349,27 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
 
 
 def shop_rows(edited: pd.DataFrame) -> list[dict]:
-    shop = edited[edited["Plan"] == PLAN_LABELS["shop"]]
+    shop = edited[(edited["Plan"] == PLAN_LABELS["shop"]) & (edited["Selling"] > 0)]
     return [
-        {"item_id": r["item_id"], "qty": r["Qty"], "uid": _num(r.get("uid")), "is_stat": r["is_stat"], "price": _num(r["List price"])}
+        {
+            "item_id": r["item_id"],
+            "name": r["Item"],
+            "qty": r["Selling"],
+            "uid": _num(r.get("uid")),
+            "is_stat": r["is_stat"],
+            "price": _num(r["List price"]),
+        }
         for _, r in shop.iterrows()
     ]
+
+
+def reserves_from_edit(base: pd.DataFrame, edited: pd.DataFrame, reserves: dict[int, int]) -> dict[int, int]:
+    """Per-item keep numbers typed into the Keeping column (weapon/armor: copies kept across rows)."""
+    new = dict(reserves)
+    for iid in edited.loc[edited["Keeping"] != base["Keeping"], "item_id"].unique():
+        rows = edited[edited["item_id"] == iid]
+        new[int(iid)] = int(rows["Keeping"].clip(lower=0).sum()) if rows["is_stat"].iloc[0] else int(max(rows["Keeping"].iloc[0], 0))
+    return new
 
 
 def _row_proceeds(row) -> float:
@@ -259,8 +378,8 @@ def _row_proceeds(row) -> float:
     if plan == "keep" or not price:
         return 0.0
     if plan == "shop":
-        return float(price) * row["Qty"]
-    return float(price) * row["Qty"] * (1.0 - MARKET_FEE)
+        return float(price) * row["Selling"]
+    return float(price) * row["Selling"] * (1.0 - MARKET_FEE)
 
 
 def _render_totals(edited: pd.DataFrame) -> None:

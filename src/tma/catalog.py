@@ -16,6 +16,7 @@ from typing import Optional
 
 import requests
 
+from .crime_items import crime_hint
 from .http_client import BASE_URL, get_json_with_retry
 
 MAX_AGE_S = 24 * 3600
@@ -72,6 +73,8 @@ def build_profiles(items: list[dict]) -> dict[str, dict]:
             "vendor": (value.get("vendor") or {}).get("name"),
             "stats": stats,
             "coverage": details.get("coverage"),
+            # Regular (non-OC) crimes say so in the item's effect/description.
+            "crime_hint": crime_hint(" ".join(filter(None, [it.get("description"), it.get("effect")]))),
         }
     return profiles
 
@@ -82,6 +85,15 @@ def write_catalog(items: list[dict], dict_path: Path, profiles_path: Path) -> No
         w = csv.DictWriter(f, fieldnames=["key", "id"])
         w.writeheader()
         w.writerows(build_dictionary(items))
+
+
+def _has_current_fields(profiles_path: Path) -> bool:
+    """A catalog written before a field was added counts as stale."""
+    try:
+        sample = next(iter(json.loads(profiles_path.read_text(encoding="utf-8")).values()))
+    except (OSError, ValueError, StopIteration):
+        return False
+    return "crime_hint" in sample
 
 
 def catalog_age_s(profiles_path: Path) -> Optional[float]:
@@ -103,7 +115,7 @@ def refresh_catalog_if_stale(
     Returns (refreshed, error). On error the existing files are left untouched.
     """
     age = catalog_age_s(profiles_path)
-    if age is not None and age < max_age_s and dict_path.exists():
+    if age is not None and age < max_age_s and dict_path.exists() and _has_current_fields(profiles_path):
         return False, None
     items, err = fetch_items(session, api_key)
     if err is not None or not items:

@@ -125,10 +125,10 @@ def build_shop_run(rows: list[dict], profiles: dict, known: Optional[dict] = Non
         if r["is_stat"]:
             if not r.get("uid"):
                 continue
-            entry = items.setdefault(iid, {"qty": 0, "uids": [], "price": r["price"], "step": step})
+            entry = items.setdefault(iid, {"qty": 0, "uids": [], "price": r["price"], "step": step, "name": r.get("name") or prof.get("name")})
             entry["uids"].append(str(r["uid"]))
         else:
-            entry = items.setdefault(iid, {"qty": 0, "uids": None, "price": r["price"], "step": step})
+            entry = items.setdefault(iid, {"qty": 0, "uids": None, "price": r["price"], "step": step, "name": r.get("name") or prof.get("name")})
         entry["qty"] += int(r["qty"])
         name = STEP_NAMES.get(step) or (known or {}).get(step, {}).get("name") or step
         shop = by_shop.setdefault(step, {"step": step, "name": name, "items": 0, "payout": 0.0})

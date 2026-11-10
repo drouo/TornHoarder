@@ -18,3 +18,6 @@ data/tornhoarder.user.js
 # What each city shop was seen buying during shop runs (per-player)
 data/shop_buys.json
 data/tma_autofill.user.js
+
+# Organized-crime required items, cached from torn/organizedcrimes
+data/oc_items.json

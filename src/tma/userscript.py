@@ -7,7 +7,7 @@ TEMPLATE = """\
 // ==UserScript==
 // @name         TornHoarder
 // @namespace    tornhoarder
-// @version      1.0.0
+// @version      1.1.0
 // @description  TornHoarder: fills Add Listing prices from your sell plan and runs one-button city shop sales.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
 // @match        https://www.torn.com/shops.php*
@@ -44,8 +44,12 @@ TEMPLATE = """\
 
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
-        : "1.0.0";
+        : "1.1.0";
     var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
+    // What was filled / held on this page, for the review list behind the status box.
+    var FILLED = [];
+    var HELD = [];
+    var DETAILS = null;
     var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
     var UNKNOWN = {};
     var HUD = null;
@@ -62,20 +66,69 @@ TEMPLATE = """\
             "position:fixed;right:8px;bottom:8px;z-index:999999;" +
             "font:11px/1.4 monospace;color:#7CFC00;background:rgba(0,0,0,.85);" +
             "border:1px solid #555;border-radius:4px;padding:4px 8px;max-width:460px;" +
-            "pointer-events:none;white-space:nowrap;";
+            "cursor:pointer;white-space:nowrap;";
+        HUD.title = "Click for the list of what was filled and held";
+        HUD.addEventListener("click", toggleDetails);
         document.body.appendChild(HUD);
         return HUD;
     }
 
+    function money(n) {
+        return "$" + Math.round(n).toLocaleString("en-US");
+    }
+
+    function filledTotal() {
+        return FILLED.reduce(function (sum, f) { return sum + f.qty * f.price; }, 0);
+    }
+
+    // Review list: every row filled (qty x price) and every row held, with why.
+    function toggleDetails() {
+        if (DETAILS && DETAILS.parentNode) {
+            DETAILS.parentNode.removeChild(DETAILS);
+            DETAILS = null;
+            return;
+        }
+        DETAILS = document.createElement("div");
+        DETAILS.style.cssText =
+            "position:fixed;right:8px;bottom:34px;z-index:999999;max-height:60vh;overflow:auto;" +
+            "font:11px/1.5 monospace;color:#ddd;background:rgba(0,0,0,.92);border:1px solid #555;" +
+            "border-radius:4px;padding:6px 10px;min-width:360px;white-space:pre;";
+        var lines = ["Filled " + FILLED.length + " row(s) · " + money(filledTotal()) + " before tax"];
+        FILLED.forEach(function (f) {
+            lines.push("  " + f.qty.toLocaleString("en-US") + " × " + f.name + " @ " + money(f.price) + " = " + money(f.qty * f.price));
+        });
+        lines.push("", "Held " + HELD.length + " row(s)");
+        HELD.forEach(function (h) {
+            lines.push("  " + h.name + " — " + h.reason);
+        });
+        DETAILS.textContent = lines.join(String.fromCharCode(10));
+        document.body.appendChild(DETAILS);
+    }
+
     function paintHud() {
         var text =
-            "TornHoarder " + VER + " | items " + Object.keys(PRICE_MAP).length +
-            " | rows " + STATS.rows + " | filled " + STATS.filled +
-            " | skipped " + STATS.skipped + " | shop/keep " + STATS.held + " | unmatched " + STATS.unmatched;
+            "TornHoarder " + VER + " | filled " + STATS.filled + " · " + money(filledTotal()) +
+            " | held " + STATS.held + " | skipped " + STATS.skipped + " | unmatched " + STATS.unmatched + "  ▸ list";
         if (text !== HUD_TEXT) {
             ensureHud().textContent = text;
             HUD_TEXT = text;
         }
+    }
+
+    function hold(container, entry, reason, outline) {
+        STATS.held += 1;
+        HELD.push({ name: entry.name, reason: reason });
+        container.setAttribute("data-tma-skipped", "1");
+        container.style.outline = outline || "1px dashed #888";
+        paintHud();
+    }
+
+    // Set a field the way typing would, so the page's own code sees the change.
+    function setField(input, value) {
+        var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        setter.call(input, String(value));
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     function matchId(name) {
@@ -255,14 +308,17 @@ TEMPLATE = """\
             shopMin = null;
             refMin = entry.fallback.refMin;
         }
+        // Weapon/armor copies you're keeping: rows don't carry copy ids here,
+        // so hold every row at least as good as the worst kept copy.
+        if (entry.keepAll || (entry.keepMinQuality != null && (quality == null || quality >= entry.keepMinQuality))) {
+            hold(container, entry, "keeping your best copy");
+            return;
+        }
         if (plan && plan !== "keep" && entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
             plan = "top";
         }
         if (plan === "keep" || plan === "shop") {
-            STATS.held += 1;
-            container.setAttribute("data-tma-skipped", "1");
-            container.style.outline = "1px dashed #888";
-            paintHud();
+            hold(container, entry, plan === "keep" ? "Keep" : "sell to a shop");
             return;
         }
         var basis = plan ? PLAN_BASIS[plan] : CFG.priceBasis;
@@ -286,28 +342,29 @@ TEMPLATE = """\
         }
         if (price != null && refMin && price < refMin) {
             console.log("[TornHoarder] held " + entry.name + " @" + price + ": under refMin " + refMin);
-            STATS.held += 1;
-            container.setAttribute("data-tma-skipped", "1");
-            container.style.outline = "2px dashed #e53935";
-            paintHud();
+            hold(container, entry, money(price) + " is under half Torn's reference price — check the market", "2px dashed #e53935");
             return;
         }
         if (price != null && quality != null && quality >= CFG.premiumThreshold) {
             container.style.outline = "2px solid #ffd97a";
         }
 
+        var qty = entry.curve ? 1 : (entry.qty || 1);
         if (price != null && inputs.price && !inputs.price.value) {
-            inputs.price.value = String(price);
+            setField(inputs.price, price);
             STATS.filled += 1;
+            FILLED.push({ name: entry.name, qty: qty, price: price });
             container.setAttribute("data-tma-filled", "1");
-            console.log("[TornHoarder] filled " + entry.name + " @" + price +
+            console.log("[TornHoarder] filled " + entry.name + " x" + qty + " @" + price +
                 " (q=" + (quality != null ? quality.toFixed(2) : "n/a") + ", " + qualitySource + ")");
+            // Always set quantity: Torn may pre-fill your whole stack, but only
+            // the Selling part (owned minus what you keep) should be listed.
+            if (CFG.fillQty && inputs.qty) {
+                setField(inputs.qty, qty);
+            }
         } else {
             STATS.skipped += 1;
             container.setAttribute("data-tma-skipped", "1");
-        }
-        if (price != null && CFG.fillQty && inputs.qty && !inputs.qty.value) {
-            inputs.qty.value = String(entry.qty || 1);
         }
         paintHud();
         window.__TMA__ = { version: VER, items: Object.keys(PRICE_MAP).length, stats: STATS };
@@ -362,13 +419,65 @@ TEMPLATE = """\
             "box-shadow:0 4px 14px rgba(0,0,0,.5);";
         document.body.appendChild(btn);
 
-        function ourRows() {
+        // Review list above the button: what click 1 will fill, line by line.
+        // Clicking a line leaves that item out of this shop's sale (and back in).
+        var excluded = {};
+        var panelSig = "";
+        var panel = document.createElement("div");
+        panel.id = "tma-shop-review";
+        panel.style.cssText =
+            "position:fixed;left:50%;bottom:136px;transform:translateX(-50%);z-index:999999;" +
+            "min-width:340px;max-height:40vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
+            "background:rgba(0,0,0,.9);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;";
+        document.body.appendChild(panel);
+
+        function renderPanel(allRows, confirming) {
+            if (!allRows.length || confirming) {
+                panel.style.display = "none";
+                panelSig = "";
+                return;
+            }
+            var byId = {};
+            var order = [];
+            allRows.forEach(function (r) {
+                if (!byId[r.id]) {
+                    byId[r.id] = { id: r.id, name: r.name, qty: 0, price: r.price };
+                    order.push(r.id);
+                }
+                byId[r.id].qty += r.qty;
+            });
+            var sig = order.map(function (id) { return id + ":" + byId[id].qty + ":" + !!excluded[id]; }).join("|");
+            panel.style.display = "block";
+            if (sig === panelSig) {
+                return;
+            }
+            panelSig = sig;
+            panel.textContent = "";
+            var head = document.createElement("div");
+            head.textContent = "Will sell here (click a line to leave it out):";
+            head.style.cssText = "color:#9ccc65;margin-bottom:4px;";
+            panel.appendChild(head);
+            order.forEach(function (id) {
+                var g = byId[id];
+                var line = document.createElement("div");
+                line.textContent = (excluded[id] ? "✕ " : "✓ ") + g.qty.toLocaleString("en-US") + " × " + g.name +
+                    " @ " + money(g.price) + " = " + money(g.qty * g.price);
+                line.style.cssText = "cursor:pointer;" + (excluded[id] ? "text-decoration:line-through;color:#888;" : "");
+                line.addEventListener("click", function () {
+                    excluded[id] = !excluded[id];
+                    render();
+                });
+                panel.appendChild(line);
+            });
+        }
+
+        function ourRows(includeExcluded) {
             var rows = [];
             var ids = document.querySelectorAll("input[type=hidden][name=ID]");
             for (var i = 0; i < ids.length; i++) {
                 var li = ids[i].closest("li");
                 var want = SHOP.items[ids[i].value];
-                if (!li || !want) {
+                if (!li || !want || (excluded[ids[i].value] && !includeExcluded)) {
                     continue;
                 }
                 var armory = li.querySelector("input[name=armoryID]");
@@ -383,7 +492,10 @@ TEMPLATE = """\
                 var have = box.type === "checkbox" ? 1 : parseInt(box.getAttribute("data-money"), 10) || 0;
                 var qty = want.uids ? have : Math.min(have, want.qty);
                 if (qty > 0) {
-                    rows.push({ li: li, box: box, qty: qty, price: Number(want.price) || 0 });
+                    rows.push({
+                        id: ids[i].value, name: want.name || ("item " + ids[i].value),
+                        li: li, box: box, qty: qty, price: Number(want.price) || 0
+                    });
                 }
             }
             return rows;
@@ -468,6 +580,8 @@ TEMPLATE = """\
                 btn.textContent = "Selling…";
                 return;
             }
+            var confirming = !!confirmButton();
+            renderPanel(ourRows(true), confirming);
             var rows = ourRows();
             if (rows.length) {
                 var n = 0;
@@ -477,7 +591,7 @@ TEMPLATE = """\
                     total += r.qty * r.price;
                 });
                 var what = n.toLocaleString("en-US") + " item(s) · " + money(total);
-                btn.textContent = confirmButton() ? "Confirm: sell " + what : "Sell " + what + " here";
+                btn.textContent = confirming ? "Confirm: sell " + what : "Sell " + what + " here";
             } else {
                 var nxt = nextShop();
                 btn.textContent = nxt

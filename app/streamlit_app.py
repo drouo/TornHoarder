@@ -14,10 +14,11 @@ if str(ROOT_DIR) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.paths import DICT_PATH, PROFILES_PATH
+from app.paths import DICT_PATH, OC_ITEMS_PATH, PROFILES_PATH
 from app.ui import autofill_export
 from app.ui.results import render_results
 from tma.catalog import refresh_catalog_if_stale
+from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
 from tma.http_client import TokenBucket, session_for_requests
@@ -289,6 +290,11 @@ if submitted:
             st.caption("Refreshed the item catalog (reference and shop prices) from Torn.")
         elif cat_err:
             st.caption(f"Couldn't refresh the item catalog ({cat_err}); using the saved copy.")
+        oc_refreshed, oc_err = refresh_oc_items_if_stale(sess, api_key, OC_ITEMS_PATH)
+        if oc_refreshed:
+            st.caption("Refreshed the list of items Organized Crimes need.")
+        elif oc_err:
+            st.caption(f"Couldn't refresh the Organized Crime item list ({oc_err}); using the saved copy.")
 
     if source == "API inventory":
         planned = len(pull_categories) if pull_categories is not None else len(INVENTORY_CATEGORIES)

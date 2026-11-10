@@ -12,9 +12,10 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app.ui.sell_plan import item_plans, overrides_from_edit
+from app.ui.sell_plan import item_plans, overrides_from_edit, plan_rows
 from tma import config
-from tma.sell_plan import MARKET_FEE, SellRules, auto_plan, decide, price_guards
+from tma.crime_items import crime_hint, parse_oc_items
+from tma.sell_plan import MARKET_FEE, SellRules, auto_plan, decide, price_guards, reserve_for
 
 RULES = SellRules()
 HARNESS = Path(__file__).resolve().parent / "fixtures" / "render_results_harness.py"
@@ -139,7 +140,8 @@ class ShopFallbackTest(unittest.TestCase):
     def test_shop_item_carries_its_market_plan_for_the_add_listing_page(self):
         summary = pd.DataFrame([{"item_id": 1483, "my_quantity": 431, "fast_sell_price": 8999.0, "fair_price": 17298.0,
                                  "greedy_price": 19000.0, "num_clean_listings": 100}])
-        edited = pd.DataFrame([{"item_id": 1483, "is_stat": False, "List price": 9000, "Qty": 431}])
+        edited = pd.DataFrame([{"item_id": 1483, "is_stat": False, "List price": 9000, "Qty": 431,
+                                "Keeping": 0, "Selling": 431, "quality": None}])
         profiles = {"1483": {"id": 1483, "name": "Insulin", "type": "Other", "vendor": "Pharmacy", "sell_price": 9000}}
         plan = item_plans(summary, edited, profiles, RULES, {})[1483]
         self.assertEqual(plan["plan"], "shop")
@@ -147,6 +149,74 @@ class ShopFallbackTest(unittest.TestCase):
         # at floor - $1), with no shop floor applied.
         self.assertEqual(plan["fallback"]["plan"], "competitive")
         self.assertEqual(plan["fallback"]["list"], 8999)
+
+
+OC = {"1350": {"name": "ID Badge", "consumed": True, "crimes": ["Pet Project", "Market Forces", "Bidding War"]},
+      "1203": {"name": "Lockpicks", "consumed": False, "crimes": ["Smoke and Wing Mirrors"]}}
+
+
+class ReserveTest(unittest.TestCase):
+    def test_oc_consumables_keep_three_tools_keep_one(self):
+        self.assertEqual(reserve_for(1350, {}, "Material", RULES, OC)[0], 3)
+        self.assertEqual(reserve_for(1203, {}, "Tool", RULES, OC)[0], 1)
+        self.assertIn("needed for OC: Pet Project, Market Forces…", reserve_for(1350, {}, "Material", RULES, OC)[1])
+
+    def test_crime_items_and_keep_one_categories(self):
+        self.assertEqual(reserve_for(906, {"crime_hint": True}, "Tool", RULES, {}), (1, "used in crimes"))
+        self.assertEqual(reserve_for(400, {}, "Clothing", RULES, {}), (1, "keep 1 of each Clothing"))
+        self.assertEqual(reserve_for(400, {}, "Other", RULES, {}), (0, ""))
+
+    def test_your_number_wins(self):
+        self.assertEqual(reserve_for(1350, {}, "Material", RULES, OC, override=0), (0, "your choice"))
+        self.assertEqual(reserve_for(400, {}, "Other", RULES, {}, override=20), (20, "your choice"))
+
+
+class CrimeHintTest(unittest.TestCase):
+    def test_current_crimes_flagged_retired_ones_not(self):
+        self.assertTrue(crime_hint("A handkerchief. Required for the disposal of firearms in Disposal."))
+        self.assertTrue(crime_hint("Improves Disposal crime exp & skill gains by 5%."))
+        self.assertFalse(crime_hint("A very simple virus. Used to plant a virus in Crimes 1.0."))
+        self.assertFalse(crime_hint("The most famous cow of Torn, punisher of the scammer."))
+
+    def test_parse_organized_crimes(self):
+        data = {"organizedcrimes": [
+            {"name": "Pet Project", "difficulty": 1, "slots": [
+                {"required_item": {"id": 1350, "name": "ID Badge", "is_used": True}},
+                {"required_item": None}]},
+            {"name": "Bidding War", "difficulty": 6, "slots": [
+                {"required_item": {"id": 1350, "name": "ID Badge", "is_used": True}}]}]}
+        self.assertEqual(parse_oc_items(data)["1350"],
+                         {"name": "ID Badge", "consumed": True, "crimes": ["Pet Project", "Bidding War"], "min_level": 1, "max_level": 6})
+
+
+def _row(iid, name, qty, is_stat=False, uid=None):
+    return {"item_id": iid, "Item": name, "My quantity": qty, "Fast-sell price": 1000.0, "Fair price": 1100.0,
+            "Greedy price": 1200.0, "is_stat": is_stat, "uid": uid}
+
+
+class PlanRowsReserveTest(unittest.TestCase):
+    PROFILES = {"624": {"id": 624, "type": "Clothing"}, "1350": {"id": 1350, "type": "Material"},
+                "8": {"id": 8, "type": "Weapon", "category": "Melee"}}
+
+    def test_stacks_sell_only_the_surplus(self):
+        rows = plan_rows([_row(624, "Bikini", 7), _row(1350, "ID Badge", 2)], {}, {}, self.PROFILES, RULES, {}, oc_items=OC)
+        bikini, badge = rows
+        self.assertEqual((bikini["Keeping"], bikini["Selling"]), (1, 6))
+        self.assertIn("keeping 1 (keep 1 of each Clothing)", bikini["Why"])
+        self.assertEqual((badge["Keeping"], badge["Selling"], badge["Plan"]), (2, 0, "Keep"))
+        self.assertIn("keeping all 2: needed for OC", badge["Why"])
+
+    def test_weapons_keep_the_best_copies(self):
+        rows_out = [_row(8, "Axe", 1, True, "a"), _row(8, "Axe", 1, True, "b"), _row(8, "Axe", 1, True, "c")]
+        rows = plan_rows(rows_out, {0: 10.0, 1: 40.0, 2: 25.0}, {}, self.PROFILES, RULES, {}, reserves={8: 1})
+        self.assertEqual([r["Keeping"] for r in rows], [0, 1, 0])
+        self.assertEqual(rows[1]["Plan"], "Keep")
+        edited = pd.DataFrame(rows)
+        summary = pd.DataFrame([{"item_id": 8, "my_quantity": 3, "fast_sell_price": 1000.0, "fair_price": 1100.0,
+                                 "greedy_price": 1200.0, "num_clean_listings": 100}])
+        plan = item_plans(summary, edited, self.PROFILES, RULES, {})[8]
+        # The Add Listing page holds rows as good as the kept copy (quality 40).
+        self.assertEqual((plan["keepMinQuality"], plan["keepAll"]), (40.0, False))
 
 
 class SellRulesTest(unittest.TestCase):

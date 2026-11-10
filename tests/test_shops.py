@@ -47,7 +47,7 @@ class BuildShopRunTest(unittest.TestCase):
         # Big Al's isn't under shops.php; its Sell page is bigalgunshop.php.
         self.assertEqual(run["route"][1]["url"], "https://www.torn.com/bigalgunshop.php")
         # Stackables are allowed by item; weapon copies only by their uid.
-        self.assertEqual(run["items"]["1483"], {"qty": 431, "uids": None, "price": 9000, "step": "pharmacy"})
+        self.assertEqual(run["items"]["1483"], {"qty": 431, "uids": None, "price": 9000, "step": "pharmacy", "name": "Insulin"})
         self.assertEqual(run["items"]["26"]["uids"], ["111", "222"])
 
     def test_copy_without_uid_and_unreachable_shop_are_skipped(self):

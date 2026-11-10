@@ -39,6 +39,10 @@ def no_catalog_refresh(monkeypatch):
 
     monkeypatch.setattr(catalog, "refresh_catalog_if_stale", lambda *a, **k: (False, None))
 
+    from tma import crime_items
+
+    monkeypatch.setattr(crime_items, "refresh_oc_items_if_stale", lambda *a, **k: (False, None))
+
 
 @pytest.fixture(autouse=True)
 def isolate_autofill_output(tmp_path, monkeypatch):
@@ -59,3 +63,4 @@ def isolate_shop_knowledge(tmp_path, monkeypatch):
     from app.ui import sell_plan
 
     monkeypatch.setattr(sell_plan, "SHOP_BUYS_PATH", tmp_path / "shop_buys.json")
+    monkeypatch.setattr(sell_plan, "OC_ITEMS_PATH", tmp_path / "oc_items.json")

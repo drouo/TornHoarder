@@ -10,3 +10,4 @@ DICT_PATH = (DATA_DIR / "torn_item_dictionary.csv").resolve()
 PROFILES_PATH = (DATA_DIR / "torn_item_profiles.json").resolve()
 AUTOFILL_PATH = DATA_DIR / "tornhoarder.user.js"
 SHOP_BUYS_PATH = DATA_DIR / "shop_buys.json"
+OC_ITEMS_PATH = DATA_DIR / "oc_items.json"

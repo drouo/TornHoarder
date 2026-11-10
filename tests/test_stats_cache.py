@@ -22,7 +22,7 @@ class FakeResponse:
 
 
 class FakeSession:
-    """torn/{uid}?selections=itemdetails; uids in `broken` come back without stats."""
+    """torn/{uid}?selections=itemdetails; uids in `broken` get an API error."""
 
     def __init__(self, broken=()):
         self.calls = []
@@ -31,7 +31,9 @@ class FakeSession:
     def get(self, url, headers=None, params=None, timeout=None):
         uid = url.rsplit("/", 1)[-1]
         self.calls.append(uid)
-        stats = {} if uid in self.broken else {"damage": 50.0, "accuracy": 55.0, "armor": None, "quality": float(uid[-2:])}
+        if uid in self.broken:
+            return FakeResponse({"error": {"code": 6, "error": "Incorrect ID"}})
+        stats = {"damage": 50.0, "accuracy": 55.0, "armor": None, "quality": float(uid[-2:])}
         return FakeResponse({"itemdetails": {"uid": int(uid), "stats": stats}})
 
 
@@ -59,6 +61,18 @@ class StatsCacheTest(unittest.TestCase):
         retry = FakeSession()
         stats, _, cached = fetch_item_stats_cached(retry, "k", ["1001"], self.path)
         self.assertEqual((retry.calls, cached, stats["1001"]["quality"]), (["1001"], 0, 1.0))
+
+    def test_copy_without_rolls_is_cached_too(self):
+        # A successful read whose stats are all None is still an answer.
+        class NoRolls(FakeSession):
+            def get(self, url, headers=None, params=None, timeout=None):
+                self.calls.append(url.rsplit("/", 1)[-1])
+                return FakeResponse({"itemdetails": {"stats": {"damage": None, "accuracy": None, "armor": None, "quality": None}}})
+
+        fetch_item_stats_cached(NoRolls(), "k", ["1001"], self.path)
+        again = FakeSession()
+        _, _, cached = fetch_item_stats_cached(again, "k", ["1001"], self.path)
+        self.assertEqual((again.calls, cached), ([], 1))
 
     def test_prune_drops_copies_you_no_longer_own(self):
         fetch_item_stats_cached(FakeSession(), "k", ["1001", "1002"], self.path)

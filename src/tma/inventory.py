@@ -171,14 +171,16 @@ def fetch_item_stats_cached(
     """
     cache = _load_stats_cache(cache_path)
     wanted = [str(u) for u in uids]
-    missing = [u for u in wanted if (cache.get(u) or {}).get("quality") is None]
+    # A successful read always has the stat keys (values may be None for a copy
+    # with no rolls); a failed one is {} and gets retried next time.
+    missing = [u for u in wanted if not cache.get(u)]
     fetched, errors = (
         fetch_item_stats_many(session, api_key, missing, bucket_take=bucket_take, on_progress=on_progress)
         if missing
         else ({}, [])
     )
     for uid, stats in fetched.items():
-        if stats and stats.get("quality") is not None:
+        if stats:
             cache[uid] = stats
     if prune:
         cache = {u: cache[u] for u in wanted if u in cache}

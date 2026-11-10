@@ -166,7 +166,6 @@ Leukaemia Teddy Bear,164
 Chocobo Flute,165
 Annoying Man,166
 Article on Crime,167
-Unknown,168
 Barbie Doll,169
 Wand of Destruction,170
 Jack-O-Lantern '05,171
@@ -240,7 +239,7 @@ Ninja Star,239
 Type 98 Anti Tank,240
 Bushmaster Carbon 15,241
 HEG,242
-Taurus,243
+Taurus PT92,243
 Blowgun,244
 Bo Staff,245
 Fireworks,246
@@ -452,9 +451,9 @@ Florin Coin,451
 Gold Noble Coin,452
 Ganesha Sculpture,453
 Vairocana Buddha Sculpture,454
-Quran Script : Ibn Masud,455
-Quran Script : Ubay Ibn Ka'b,456
-Quran Script : Ali,457
+Companion Script : Abdullah,455
+Companion Script : Ubay,456
+Companion Script : Ali,457
 Shabti Sculpture,458
 Egyptian Amulet,459
 White Senet Pawn,460
@@ -586,10 +585,6 @@ Pink Easter Egg,585
 Jawbreaker,586
 Bag of Sherbet,587
 Goodie Bag,588
-Undefined,589
-Undefined 2,590
-Undefined 3,591
-Undefined 4,592
 Mr Torn Crown '11,593
 Ms Torn Crown '11,594
 Pile of Vomit,595
@@ -824,7 +819,7 @@ Vial of Urine,823
 Vial of Saliva,824
 Questionnaire,825
 Agreement,826
-Perceptron : Calibrator,827
+Perceptron,827
 Donald Trump Mask '16,828
 Yellow Snowman '16,829
 Nock Gun,830
@@ -967,7 +962,7 @@ Fitted Shirt,967
 Bow Tie,968
 Neck Tie,969
 Waistcoat,970
-Blazer,971
+Suit Jacket,971
 Suit Trousers,972
 Derby Shoes,973
 Smoking Jacket,974
@@ -1480,3 +1475,30 @@ Quartz Point,1504
 Evil Christmas Gonk,1505
 Copium Inhaler,1506
 Snowman Mask '25,1507
+Priceless Painting,1508
+Angle Grinder,1509
+Collection Bucket,1533
+Ordination Certificate,1534
+Medical License,1535
+Messenger Bag,1536
+Hi-vis Vest,1537
+Clipboard,1538
+Lab Coat,1539
+Bluetooth Earpiece,1540
+Stethoscope,1541
+Lapel Pin,1542
+Utility Bill,1543
+Amsterdam Shot Glass '26,1544
+Boston Shot Glass '26,1545
+Blazer,1547
+Resupply Box,1548
+Wheel Clamp,1549
+Voice Recorder,1550
+Court Order,1551
+Nightstick,1552
+Government Contract,1553
+Ruby Brooch,1554
+Alexandrite Manchette,1555
+Emerald Plastron,1556
+Binder,1557
+Plague Doctor Mask '26,1563

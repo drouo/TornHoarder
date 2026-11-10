@@ -21,3 +21,6 @@ data/tma_autofill.user.js
 
 # Organized-crime required items, cached from torn/organizedcrimes
 data/oc_items.json
+
+# Your weapon/armor copies' stats, cached by uid (they never change)
+data/uid_stats.json

@@ -64,3 +64,12 @@ def isolate_shop_knowledge(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sell_plan, "SHOP_BUYS_PATH", tmp_path / "shop_buys.json")
     monkeypatch.setattr(sell_plan, "OC_ITEMS_PATH", tmp_path / "oc_items.json")
+
+
+@pytest.fixture(autouse=True)
+def isolate_stats_cache(tmp_path, monkeypatch):
+    """The app caches each weapon/armor copy's stats in data/uid_stats.json;
+    full-app tests with a mocked Torn must not read or write the real one."""
+    from app import paths
+
+    monkeypatch.setattr(paths, "UID_STATS_PATH", tmp_path / "uid_stats.json")

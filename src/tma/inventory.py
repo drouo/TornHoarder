@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
@@ -140,6 +142,49 @@ def fetch_item_stats_many(
         if last is not None:
             errors.append(f"uid {uid}: {last}")
     return stats_by_uid, errors[:5]
+
+
+def _load_stats_cache(path: Path) -> dict:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def fetch_item_stats_cached(
+    session: requests.Session,
+    api_key: str,
+    uids: list[int | str],
+    cache_path: Path,
+    bucket_take: Optional[Callable[[int], None]] = None,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+    prune: bool = False,
+) -> tuple[dict, list[str], int]:
+    """Like fetch_item_stats_many, but each copy is read from Torn only once.
+
+    A copy's damage/accuracy/armor/quality never change, so complete stats are
+    kept in `cache_path` and reused; only new copies (or ones whose read failed
+    before) cost an API call. `prune` drops copies not in `uids`, for a full
+    inventory pull where anything missing has been sold or traded away.
+    Returns (stats_by_uid, errors, n_from_cache).
+    """
+    cache = _load_stats_cache(cache_path)
+    wanted = [str(u) for u in uids]
+    missing = [u for u in wanted if (cache.get(u) or {}).get("quality") is None]
+    fetched, errors = (
+        fetch_item_stats_many(session, api_key, missing, bucket_take=bucket_take, on_progress=on_progress)
+        if missing
+        else ({}, [])
+    )
+    for uid, stats in fetched.items():
+        if stats and stats.get("quality") is not None:
+            cache[uid] = stats
+    if prune:
+        cache = {u: cache[u] for u in wanted if u in cache}
+    Path(cache_path).write_text(json.dumps(cache), encoding="utf-8")
+    result = {u: cache.get(u) or fetched.get(u) or {} for u in wanted}
+    return result, errors, len(wanted) - len(missing)
 
 
 def _parse_page(data: dict, category: Optional[str]) -> list[InventoryEntry]:

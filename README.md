@@ -8,7 +8,7 @@ Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.c
 
 1. Install Python 3.10+, then run `pip install -r requirements.txt`.
 2. Start the app with `streamlit run app/streamlit_app.py`. On Windows you can use `powershell -ExecutionPolicy Bypass -File tools\server.ps1 start` instead.
-3. Open http://localhost:8501, enter a **Limited** Torn API key, choose your **Sell categories**, and click **Run**.
+3. Open http://localhost:8501, enter a **Limited** Torn API key, choose your **Sell categories**, and click **Run**. The first run reads every weapon/armor copy's stats and takes a while. Those stats never change, so later runs reuse them (`data/uid_stats.json`) and only fetch fresh market prices.
 4. On the **Autofill script** tab, click the link to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together.
 5. On the **Sell plan** tab, click **Start shop run →** for city-shop sales, then open Torn's Add Listing page for everything else.
 

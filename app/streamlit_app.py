@@ -14,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.paths import DICT_PATH, OC_ITEMS_PATH, PROFILES_PATH
+from app.paths import DICT_PATH, OC_ITEMS_PATH, PROFILES_PATH, UID_STATS_PATH
 from app.ui import autofill_export
 from app.ui.results import render_results
 from tma.catalog import refresh_catalog_if_stale
@@ -24,8 +24,7 @@ from tma.sell_plan import SellRules
 from tma.http_client import TokenBucket, session_for_requests
 from tma.inventory import (
     fetch_inventory,
-    fetch_item_stats,
-    fetch_item_stats_many,
+    fetch_item_stats_cached,
     inventory_category_for_profile,
     to_rows,
     InventoryEntry,
@@ -333,12 +332,16 @@ if submitted:
                     def stat_report(done: int, total: int) -> None:
                         status_box.update(label=f"Step 2/4 · reading copy stats {done}/{total}…", state="running")
 
-                    uid_stats, uid_errors = fetch_item_stats_many(
-                        sess, api_key, stats_targets, bucket_take=bucket.take, on_progress=stat_report
+                    uid_stats, uid_errors, n_cached = fetch_item_stats_cached(
+                        sess, api_key, stats_targets, UID_STATS_PATH,
+                        bucket_take=bucket.take, on_progress=stat_report, prune=True,
                     )
                     for err in uid_errors:
                         st.caption(f"copy stats: {err}")
-                    st.caption(f"Read individual stats for {len(uid_stats)} weapon/armor copies.")
+                    st.caption(
+                        f"Stats for {len(uid_stats)} weapon/armor copies: {n_cached} remembered, "
+                        f"{len(uid_stats) - n_cached} read from Torn."
+                    )
         status_box.update(
             label=f"Step 2/4 · inventory ready ({len(entries)} items)"
             + (f" · {len(inv.errors)} errors" if inv.errors else ""),
@@ -410,9 +413,9 @@ if submitted:
                 df_parsed = pd.DataFrame([{"name": single_name, "id": iid, "quantity": 1}])
                 agg = [(iid, 1)]
                 items = [(iid, 1, single_name)]
-                stats = fetch_item_stats(sess, api_key, single_uid, bucket_take=bucket.take)
-                if stats:
-                    uid_stats[single_uid] = stats
+                stats = fetch_item_stats_cached(sess, api_key, [single_uid], UID_STATS_PATH, bucket_take=bucket.take)[0]
+                if stats.get(str(single_uid)):
+                    uid_stats[single_uid] = stats[str(single_uid)]
                 else:
                     st.caption(f"Couldn't read stats for copy uid {single_uid}; using market medians.")
             else:
@@ -431,7 +434,9 @@ if submitted:
                     if profile and profile.get("type") in ("Weapon", "Armor"):
                         uid_targets = sorted({e.uid for e in owned if e.uid})
                         if uid_targets:
-                            uid_stats, uid_errors = fetch_item_stats_many(sess, api_key, uid_targets, bucket_take=bucket.take)
+                            uid_stats, uid_errors, _ = fetch_item_stats_cached(
+                                sess, api_key, uid_targets, UID_STATS_PATH, bucket_take=bucket.take
+                            )
                             for err in uid_errors:
                                 st.caption(f"copy stats: {err}")
                             st.caption(f"Read individual stats for {len(uid_stats)} of your {len(owned)} copies.")

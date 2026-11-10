@@ -5,15 +5,15 @@ from typing import Dict, Optional
 
 TEMPLATE = """\
 // ==UserScript==
-// @name         TMA Autofill - Torn Item Market
-// @namespace    torn-market-analyzer
-// @version      0.5.0
-// @description  Fills Add Listing prices from the TMA app and runs one-button city shop sales.
+// @name         TornHoarder
+// @namespace    tornhoarder
+// @version      1.0.0
+// @description  TornHoarder: fills Add Listing prices from your sell plan and runs one-button city shop sales.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
 // @match        https://www.torn.com/shops.php*
 // @match        https://www.torn.com/bigalgunshop.php*
-// @updateURL    http://127.0.0.1:9999/tma_autofill.user.js
-// @downloadURL  http://127.0.0.1:9999/tma_autofill.user.js
+// @updateURL    http://127.0.0.1:9999/tornhoarder.user.js
+// @downloadURL  http://127.0.0.1:9999/tornhoarder.user.js
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
@@ -44,7 +44,7 @@ TEMPLATE = """\
 
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
-        : "0.5.0";
+        : "1.0.0";
     var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
     var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
     var UNKNOWN = {};
@@ -69,7 +69,7 @@ TEMPLATE = """\
 
     function paintHud() {
         var text =
-            "TMA " + VER + " | items " + Object.keys(PRICE_MAP).length +
+            "TornHoarder " + VER + " | items " + Object.keys(PRICE_MAP).length +
             " | rows " + STATS.rows + " | filled " + STATS.filled +
             " | skipped " + STATS.skipped + " | shop/keep " + STATS.held + " | unmatched " + STATS.unmatched;
         if (text !== HUD_TEXT) {
@@ -220,7 +220,7 @@ TEMPLATE = """\
         if (!entry) {
             if (name && itemId == null && !UNKNOWN[name]) {
                 UNKNOWN[name] = true;
-                console.log("[TMA] no price data for row: " + name);
+                console.log("[TornHoarder] no price data for row: " + name);
             }
             STATS.unmatched += 1;
             container.setAttribute("data-tma-skipped", "1");
@@ -285,7 +285,7 @@ TEMPLATE = """\
             price = Math.max(price, shopMin);
         }
         if (price != null && refMin && price < refMin) {
-            console.log("[TMA] held " + entry.name + " @" + price + ": under refMin " + refMin);
+            console.log("[TornHoarder] held " + entry.name + " @" + price + ": under refMin " + refMin);
             STATS.held += 1;
             container.setAttribute("data-tma-skipped", "1");
             container.style.outline = "2px dashed #e53935";
@@ -300,7 +300,7 @@ TEMPLATE = """\
             inputs.price.value = String(price);
             STATS.filled += 1;
             container.setAttribute("data-tma-filled", "1");
-            console.log("[TMA] filled " + entry.name + " @" + price +
+            console.log("[TornHoarder] filled " + entry.name + " @" + price +
                 " (q=" + (quality != null ? quality.toFixed(2) : "n/a") + ", " + qualitySource + ")");
         } else {
             STATS.skipped += 1;
@@ -548,7 +548,7 @@ TEMPLATE = """\
                     rejects: rejects.map(Number)
                 })
             });
-            console.log("[TMA] reported " + step + ": buys " + Object.keys(buys).length + ", refused " + rejects.length);
+            console.log("[TornHoarder] reported " + step + ": buys " + Object.keys(buys).length + ", refused " + rejects.length);
             return true;
         }
 
@@ -560,7 +560,7 @@ TEMPLATE = """\
             }
             render();
         }, 700);
-        console.log("[TMA] shop run v" + VER + ": " + route.length + " shop(s) on route");
+        console.log("[TornHoarder] shop run v" + VER + ": " + route.length + " shop(s) on route");
     }
 
     if (window.top !== window) {
@@ -574,7 +574,7 @@ TEMPLATE = """\
         return;
     }
 
-    console.log("[TMA] autofill v" + VER + " loaded, " + Object.keys(PRICE_MAP).length + " items priced");
+    console.log("[TornHoarder] autofill v" + VER + " loaded, " + Object.keys(PRICE_MAP).length + " items priced");
     setTimeout(extract, 2500);
     var timer = setInterval(extract, Number(CFG.scanMs) || 1500);
     window.addEventListener("beforeunload", function () {

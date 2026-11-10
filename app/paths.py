@@ -8,5 +8,5 @@ DATA_DIR = ROOT_DIR / "data"
 
 DICT_PATH = (DATA_DIR / "torn_item_dictionary.csv").resolve()
 PROFILES_PATH = (DATA_DIR / "torn_item_profiles.json").resolve()
-AUTOFILL_PATH = DATA_DIR / "tma_autofill.user.js"
+AUTOFILL_PATH = DATA_DIR / "tornhoarder.user.js"
 SHOP_BUYS_PATH = DATA_DIR / "shop_buys.json"

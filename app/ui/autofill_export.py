@@ -101,7 +101,7 @@ def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
     st.download_button(
         "Download Torn autofill script (.user.js) — manual install",
         userjs,
-        file_name="tma_autofill.user.js",
+        file_name="tornhoarder.user.js",
         mime="application/javascript",
         key="download_userjs",
     )

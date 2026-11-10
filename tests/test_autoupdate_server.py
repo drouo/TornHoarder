@@ -14,7 +14,7 @@ from tma.autoupdate_server import build_server
 class AutoupdateServerTest(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
-        self.script_path = Path(self._tmpdir.name) / "tma_autofill.user.js"
+        self.script_path = Path(self._tmpdir.name) / "tornhoarder.user.js"
 
     def tearDown(self):
         self._tmpdir.cleanup()

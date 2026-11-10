@@ -99,7 +99,7 @@ Each shop page also reports what it really lists back to the app's local server 
 
 ```
 
-torn-market-analyzer/
+TornHoarder/
 ├─ app/
 │  ├─ streamlit_app.py      # input form + pipeline orchestration
 │  ├─ paths.py               # shared path constants

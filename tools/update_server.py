@@ -1,9 +1,9 @@
-"""Minimal HTTP server that serves the latest tma_autofill.user.js for Tampermonkey auto-update.
+"""Minimal HTTP server that serves the latest tornhoarder.user.js for Tampermonkey auto-update.
 
 Usage:
     python tools/update_server.py [--port 9999]
 
-Tampermonkey @updateURL: http://127.0.0.1:9999/tma_autofill.user.js
+Tampermonkey @updateURL: http://127.0.0.1:9999/tornhoarder.user.js
 
 Note: the Streamlit app now starts this same server automatically inside
 its own process (see app/ui/autofill_export.py) as soon as the Autofill

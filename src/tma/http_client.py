@@ -43,7 +43,7 @@ def session_for_requests(pool_size: int = 50) -> requests.Session:
     session = requests.Session()
     adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
     session.mount("https://", adapter)
-    session.headers.update({"accept": "application/json", "User-Agent": "torn-market-analyzer/2.0"})
+    session.headers.update({"accept": "application/json", "User-Agent": "TornHoarder/1.0"})
     return session
 
 

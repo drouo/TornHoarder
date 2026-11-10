@@ -1,4 +1,4 @@
-"""Tiny HTTP server that serves the generated tma_autofill.user.js so
+"""Tiny HTTP server that serves the generated tornhoarder.user.js so
 Tampermonkey can install/update it from a URL instead of a downloaded file.
 
 It also accepts `POST /shop-report` from the userscript (sent through
@@ -22,7 +22,7 @@ from typing import Optional
 from .shops import record_shop_report
 
 DEFAULT_PORT = 9999
-SCRIPT_NAME = "tma_autofill.user.js"
+SCRIPT_NAME = "tornhoarder.user.js"
 MAX_REPORT_BYTES = 200_000
 
 

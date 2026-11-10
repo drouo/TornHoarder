@@ -139,10 +139,7 @@ anything you'd rather keep at full price, and copy the listing text.
 #### Suggested prices
 - **Fair price:** clean median (volume-weighted in normal markets, per-listing in thin ones).
 - **Greedy price:** clean Q3 (upper quartile) of prices.
-- **Fast-sell price:**
-  - Thin markets: around the 3rd cheapest clean listing.
-  - Unit-style markets: around the N-th cheapest clean listing.
-  - Bulk markets: first price where cumulative clean volume reaches a target units threshold.
+- **Fast-sell price:** $1 under the cheapest clean listing — buyers take the cheapest listing first.
         """
     )
 

@@ -57,10 +57,7 @@ All prices are computed from the **cleaned** order book:
 - **Greedy price**
   - Upper quartile (Q3), weighted or unweighted depending on market type
 - **Fast-sell price**
-  - Thin/exclusive markets: around the **3rd cheapest** clean listing
-  - Unit-style markets: around the **10th cheapest** clean listing
-  - Bulk markets: first price where cumulative clean depth reaches **100 units** (or full depth if < 100)
-  - **Undercut by $1 only in bulk markets**
+  - **$1 under the cheapest clean listing**: buyers take the cheapest listing first
 
 
 

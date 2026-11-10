@@ -10,6 +10,8 @@ import pandas as pd
 from tma.market_enrichment import (
     QUALITY_STEP,
     build_stat_payload,
+    compute_price_suggestions_for_item,
+    enrich_item_orders,
     price_at_quality,
     quality_from_stats,
 )
@@ -114,6 +116,38 @@ class QualityFromStatsTest(unittest.TestCase):
         payload = {"fit": {"type": "Armor", "intercept": None, "coef": {"armor": 1.0}, "base": {"armor": 10.0}}}
         q = quality_from_stats(payload, {"armor": 12.0})
         self.assertAlmostEqual(q, 40.0)  # (12 - 10) * 20
+
+
+class FastSellTest(unittest.TestCase):
+    def _summary(self, prices, qtys):
+        df = pd.DataFrame(
+            {
+                "item_id": 180,
+                "item_name": "Bottle of Beer",
+                "item_type": "Alcohol",
+                "average_price": 900.0,
+                "my_quantity": 50,
+                "price": [float(p) for p in prices],
+                "quantity": [float(q) for q in qtys],
+            }
+        )
+        return compute_price_suggestions_for_item(enrich_item_orders(df))
+
+    def test_fast_sell_is_one_under_the_floor(self):
+        s = self._summary([900, 905, 910, 950, 1000] * 20, [50] * 100)
+        self.assertEqual(s["floor_price"], 900.0)
+        self.assertEqual(s["fast_sell_price"], 899.0)
+        self.assertEqual(s["num_clean_listings"], 100)
+
+    def test_fast_sell_never_goes_below_one(self):
+        s = self._summary([1, 1, 2], [5, 5, 5])
+        self.assertEqual(s["fast_sell_price"], 1.0)
+
+
+    def test_fat_fingered_listing_does_not_set_the_floor(self):
+        s = self._summary([1] + [800_000, 805_000, 810_000] * 33, [1] * 100)
+        self.assertEqual(s["floor_price"], 800_000.0)
+        self.assertEqual(s["fast_sell_price"], 799_999.0)
 
 
 if __name__ == "__main__":

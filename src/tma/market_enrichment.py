@@ -6,11 +6,10 @@ import numpy as np
 import pandas as pd
 
 
-FAST_SELL_UNITS_THRESHOLD = 100.0
-FAST_SELL_LISTINGS_THRESHOLD = 10
 EXCLUSIVE_TOTAL_UNITS_THRESHOLD = 200.0
 EXCLUSIVE_DOMINANCE_SHARE = 0.50
 EXCLUSIVE_HIGH_FACTOR = 10.0
+LOW_OUTLIER_FACTOR = 0.5  # listings under half the clean median aren't the "floor"
 
 QUALITY_STEP = 5.0
 MIN_QUALITY_SAMPLES = 5
@@ -196,7 +195,6 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
 
     total_qty_clean = float(df_clean["quantity"].sum())
     total_listings_clean = int(len(df_clean))
-    avg_qty_per_listing = total_qty_clean / total_listings_clean
 
     level = df_clean.groupby("price", as_index=False)["quantity"].sum().rename(columns={"quantity": "level_qty"})
     max_level_share_clean = float(level["level_qty"].max()) / total_qty_clean
@@ -212,22 +210,14 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
         q1_price = _weighted_price_quantile(df_clean, 0.25)
         q3_price = _weighted_price_quantile(df_clean, 0.75)
 
-    df_clean_sorted = df_clean.sort_values("price").copy()
-    df_clean_sorted["cum_qty_clean"] = df_clean_sorted["quantity"].cumsum()
-
-    is_bulk_mode = (not exclusive_mode) and (avg_qty_per_listing > 2.0)
-
-    if exclusive_mode:
-        fast_sell_raw = float(df_clean_sorted.iloc[min(2, len(df_clean_sorted) - 1)]["price"])
-    else:
-        if avg_qty_per_listing <= 2.0:
-            fast_sell_raw = float(df_clean_sorted.iloc[min(FAST_SELL_LISTINGS_THRESHOLD, len(df_clean_sorted)) - 1]["price"])
-        else:
-            target_units = min(FAST_SELL_UNITS_THRESHOLD, total_qty_clean)
-            fast_sell_raw = float(df_clean_sorted.loc[df_clean_sorted["cum_qty_clean"] >= target_units, "price"].iloc[0])
-
-    base_price = float(round(fast_sell_raw))
-    fast_sell_price = max(math.floor(base_price) - 1, 0.0) if is_bulk_mode else max(base_price, 0.0)
+    # Buyers take the cheapest listing first, so the only price that sells
+    # "fast" is one dollar under the current clean floor. Anchor removal only
+    # catches high outliers; a fat-fingered $1 listing would otherwise drag
+    # every undercut down with it, so listings far below the median don't
+    # count as the floor.
+    sane = df_clean.loc[df_clean["price"] >= LOW_OUTLIER_FACTOR * fair_price, "price"]
+    floor_price = float(sane.min()) if not sane.empty else float(fair_price)
+    fast_sell_price = max(math.floor(floor_price) - 1, 1.0)
 
     payload: dict = build_stat_payload(df_item)
 
@@ -239,6 +229,8 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
         "my_quantity": my_quantity,
         "num_listings": int(len(df_item)),
         "num_suspected_anchors": int(df_item["is_suspected_anchor"].sum()) if "is_suspected_anchor" in df_item.columns else 0,
+        "num_clean_listings": total_listings_clean,
+        "floor_price": floor_price,
         "fast_sell_price": float(fast_sell_price),
         "fair_price": float(fair_price),
         "greedy_price": float(q3_price),

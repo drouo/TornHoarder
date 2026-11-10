@@ -29,100 +29,20 @@ TEMPLATE = """\
     var CFG = __CFG__;
     var SHOP = __SHOP__;
 
-    var NAME_TO_ID = {};
     Object.keys(PRICE_MAP).forEach(function (itemId) {
-        NAME_TO_ID[PRICE_MAP[itemId].name] = parseInt(itemId, 10);
         PRICE_MAP[itemId].fast = Number(PRICE_MAP[itemId].fast);
         PRICE_MAP[itemId].fair = Number(PRICE_MAP[itemId].fair);
         PRICE_MAP[itemId].greedy = Number(PRICE_MAP[itemId].greedy);
     });
 
-    var NAME_LOOKUP = {};
-    Object.keys(PRICE_MAP).forEach(function (itemId) {
-        var nm = PRICE_MAP[itemId].name;
-        NAME_LOOKUP[nm] = parseInt(itemId, 10);
-        NAME_LOOKUP[nm.toLowerCase()] = parseInt(itemId, 10);
-    });
-
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
         : "__VERSION__";
-    var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
-    // What was filled / held on this page, for the review list behind the status box.
-    var FILLED = [];
-    var HELD = [];
-    var DETAILS = null;
     var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
-    var UNKNOWN = {};
-    var HUD = null;
-    var HUD_TEXT = "";
-    var scanning = false;
+    var NL = String.fromCharCode(10);
 
-    function ensureHud() {
-        if (HUD && HUD.parentNode) {
-            return HUD;
-        }
-        HUD = document.createElement("div");
-        HUD.id = "tma-hud";
-        HUD.style.cssText =
-            "position:fixed;right:8px;bottom:8px;z-index:999999;" +
-            "font:11px/1.4 monospace;color:#7CFC00;background:rgba(0,0,0,.85);" +
-            "border:1px solid #555;border-radius:4px;padding:4px 8px;max-width:460px;" +
-            "cursor:pointer;white-space:nowrap;";
-        HUD.title = "Click for the list of what was filled and held";
-        HUD.addEventListener("click", toggleDetails);
-        document.body.appendChild(HUD);
-        return HUD;
-    }
-
-    function money(n) {
+    function fmtMoney(n) {
         return "$" + Math.round(n).toLocaleString("en-US");
-    }
-
-    function filledTotal() {
-        return FILLED.reduce(function (sum, f) { return sum + f.qty * f.price; }, 0);
-    }
-
-    // Review list: every row filled (qty x price) and every row held, with why.
-    function toggleDetails() {
-        if (DETAILS && DETAILS.parentNode) {
-            DETAILS.parentNode.removeChild(DETAILS);
-            DETAILS = null;
-            return;
-        }
-        DETAILS = document.createElement("div");
-        DETAILS.style.cssText =
-            "position:fixed;right:8px;bottom:34px;z-index:999999;max-height:60vh;overflow:auto;" +
-            "font:11px/1.5 monospace;color:#ddd;background:rgba(0,0,0,.92);border:1px solid #555;" +
-            "border-radius:4px;padding:6px 10px;min-width:360px;white-space:pre;";
-        var lines = ["Filled " + FILLED.length + " row(s) · " + money(filledTotal()) + " before tax"];
-        FILLED.forEach(function (f) {
-            lines.push("  " + f.qty.toLocaleString("en-US") + " × " + f.name + " @ " + money(f.price) + " = " + money(f.qty * f.price));
-        });
-        lines.push("", "Held " + HELD.length + " row(s)");
-        HELD.forEach(function (h) {
-            lines.push("  " + h.name + " — " + h.reason);
-        });
-        DETAILS.textContent = lines.join(String.fromCharCode(10));
-        document.body.appendChild(DETAILS);
-    }
-
-    function paintHud() {
-        var text =
-            "TornHoarder " + VER + " | filled " + STATS.filled + " · " + money(filledTotal()) +
-            " | held " + STATS.held + " | skipped " + STATS.skipped + " | unmatched " + STATS.unmatched + "  ▸ list";
-        if (text !== HUD_TEXT) {
-            ensureHud().textContent = text;
-            HUD_TEXT = text;
-        }
-    }
-
-    function hold(container, entry, reason, outline) {
-        STATS.held += 1;
-        HELD.push({ name: entry.name, reason: reason });
-        container.setAttribute("data-tma-skipped", "1");
-        container.style.outline = outline || "1px dashed #888";
-        paintHud();
     }
 
     // Set a field the way typing would, so the page's own code sees the change.
@@ -133,56 +53,9 @@ TEMPLATE = """\
         input.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    function matchId(name) {
-        if (!name) {
-            return null;
-        }
-        var id = NAME_LOOKUP[name];
-        if (id == null) {
-            id = NAME_LOOKUP[name.toLowerCase()];
-        }
-        return id != null ? id : null;
-    }
-
-    function money(value) {
-        var n = parseFloat(String(value || "").replace(/[^0-9.]/g, ""));
-        return isFinite(n) ? n : NaN;
-    }
-
-    function rowName(container) {
-        var el = container.querySelector("[data-item]");
-        if (el && el.getAttribute("data-item")) {
-            return el.getAttribute("data-item").trim();
-        }
-        var nm = container.querySelector(".item-name, [class*='item-name']");
-        if (nm) {
-            return nm.textContent.trim();
-        }
-        return null;
-    }
-
-    function rowInputs(container) {
-        var price = container.querySelector(
-            "input.input-money, input[name*='price'], input[id*='price'], input[class*='price']"
-        );
-        var qty = container.querySelector(
-            "input[name*='amount'], input[id*='amount'], input[class*='amount']"
-        );
-        return { price: price, qty: qty };
-    }
-
-    function rowRolls(container) {
-        var text = (container.textContent || "").replace(/\\u00a0/g, " ").toLowerCase();
-        var pts = { damage: 0, accuracy: 0, armor: 0 };
-        var found = false;
-        ["damage", "accuracy", "armor"].forEach(function (key) {
-            var m = text.match(new RegExp(key + ":?\\\\s*([0-9.]+)"));
-            if (m) {
-                pts[key] = parseFloat(m[1]);
-                found = true;
-            }
-        });
-        return found ? pts : null;
+    function stepName(step) {
+        var r = (SHOP.route || []).filter(function (x) { return x.step === step; })[0];
+        return r ? r.name : step;
     }
 
     function premiumFor(quality) {
@@ -257,144 +130,561 @@ TEMPLATE = """\
         return null;
     }
 
-    function processRow(container) {
-        if (container.getAttribute("data-tma-filled") || container.getAttribute("data-tma-skipped")) {
-            return;
-        }
-        var name = rowName(container);
-        var itemId = name ? matchId(name) : null;
-        var entry = itemId != null ? PRICE_MAP[itemId] : null;
-        var inputs = rowInputs(container);
-        var rolls = rowRolls(container);
-        var base = itemId != null ? BASE_STATS[itemId] : null;
-
-        if (entry && !inputs.price) {
-            return;
-        }
-
-        if (!entry) {
-            if (name && itemId == null && !UNKNOWN[name]) {
-                UNKNOWN[name] = true;
-                console.log("[TornHoarder] no price data for row: " + name);
-            }
-            STATS.unmatched += 1;
-            container.setAttribute("data-tma-skipped", "1");
-            paintHud();
-            return;
-        }
-
+    // ---- Pricing one Add Listing row ----------------------------------------
+    // Returns {price, qty, plan} to fill, or {hold: reason}. `rolls` are the
+    // copy's damage/accuracy (weapons) or armor shown on the row; `isCopy`
+    // means a weapon/armor row (one copy, ticked via "Select").
+    function planListing(itemId, entry, rolls, isCopy, owned) {
+        var base = BASE_STATS[itemId];
         var quality = null;
-        var qualitySource = null;
-        if (entry.fit && rolls) {
-            quality = qualityFromFit(entry.fit, rolls);
-            qualitySource = "fit";
-        } else if (base && rolls) {
-            quality =
-                base.type === "Weapon"
-                    ? (rolls.damage - base.damage + (rolls.accuracy - base.accuracy)) * 10
-                    : (rolls.armor - base.armor) * 20;
-            qualitySource = "base";
+        if (rolls) {
+            if (entry.fit) {
+                quality = qualityFromFit(entry.fit, rolls);
+            } else if (base) {
+                quality = base.type === "Weapon"
+                    ? ((rolls.damage || 0) - base.damage + ((rolls.accuracy || 0) - base.accuracy)) * 10
+                    : ((rolls.armor || 0) - base.armor) * 20;
+            }
         }
-
-        // Sell plan from the app; an automatic plan is bumped to "top" for a
-        // high-roll copy, since the app can't tell which row is which copy.
         var plan = entry.plan || null;
         var listPrice = entry.list;
         var shopMin = entry.shopMin;
         var refMin = entry.refMin;
-        if (plan === "shop" && entry.fallback) {
-            // Still in inventory, so no shop took it (or the shop run hasn't
-            // been done): list it with its market plan, without the shop floor.
+        if (plan === "shop") {
+            var routed = SHOP.items[String(itemId)];
+            if (routed) {
+                return { hold: "sell at " + stepName(routed.step) + " instead (shop run pays more)" };
+            }
+            if (!entry.fallback) {
+                return { hold: "sell to a shop" };
+            }
+            // No shop takes it: list it with its market plan, without the shop floor.
             plan = entry.fallback.plan;
             listPrice = entry.fallback.list;
             shopMin = null;
             refMin = entry.fallback.refMin;
         }
-        // Weapon/armor copies you're keeping: rows don't carry copy ids here,
-        // so hold every row at least as good as the worst kept copy.
-        if (entry.keepAll || (entry.keepMinQuality != null && (quality == null || quality >= entry.keepMinQuality))) {
-            hold(container, entry, "keeping your best copy");
-            return;
+        if (isCopy && (entry.keepAll || (entry.keepMinQuality != null && (quality == null || quality >= entry.keepMinQuality)))) {
+            return { hold: "keeping your best copy" };
         }
-        if (plan && plan !== "keep" && entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
+        if (!plan || plan === "keep") {
+            return { hold: "Keep" };
+        }
+        if (entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
             plan = "top";
         }
-        if (plan === "keep" || plan === "shop") {
-            hold(container, entry, plan === "keep" ? "Keep" : "sell to a shop");
-            return;
+        var basis = PLAN_BASIS[plan] || CFG.priceBasis;
+        var price = null;
+        if (isCopy && entry.curve && quality != null) {
+            price = interpolate(entry.curve, quality, basis);
+            if (price != null && plan === "dump") {
+                price = Math.max(Math.round(price * (1 - CFG.dumpUndercutPct / 100)), 1);
+            }
         }
-        var basis = plan ? PLAN_BASIS[plan] : CFG.priceBasis;
-
-        var curvePrice = entry.curve && quality != null
-            ? interpolate(entry.curve, quality, basis)
-            : null;
-        if (curvePrice != null && plan === "dump") {
-            curvePrice = Math.max(Math.round(curvePrice * (1 - CFG.dumpUndercutPct / 100)), 1);
+        if (isCopy && price != null && entry.fast > 0) {
+            // A thin quality band can rest on one cheap listing; no copy is worth
+            // less than the item's cheapest listing of any quality.
+            var floor = plan === "dump" ? entry.fast * (1 - CFG.dumpUndercutPct / 100) : entry.fast;
+            price = Math.max(price, Math.round(floor));
         }
-        var basePrice = listPrice != null ? listPrice : (entry[basis] || null);
-        var price = curvePrice != null && curvePrice > 0 ? curvePrice : basePrice;
-        if (!plan && price != null && quality != null && quality >= CFG.premiumThreshold && curvePrice == null) {
-            price = Math.max(price, Math.round(price * premiumFor(quality)));
+        if (price == null || !(price > 0)) {
+            price = listPrice != null ? listPrice : (entry[basis] || null);
         }
-        // Same guards as the app: never list under what a shop pays after
-        // tax, and leave anything under half Torn's reference price for a
-        // manual look (a stray $1 listing can drag a curve bucket down).
-        if (price != null && shopMin) {
+        if (price == null || !(price > 0)) {
+            return { hold: "no price" };
+        }
+        if (shopMin) {
             price = Math.max(price, shopMin);
         }
-        if (price != null && refMin && price < refMin) {
-            console.log("[TornHoarder] held " + entry.name + " @" + price + ": under refMin " + refMin);
-            hold(container, entry, money(price) + " is under half Torn's reference price — check the market", "2px dashed #e53935");
-            return;
+        price = Math.round(price);
+        if (refMin && price < refMin) {
+            return { hold: fmtMoney(price) + " is under half Torn's reference price, check the market" };
         }
-        if (price != null && quality != null && quality >= CFG.premiumThreshold) {
-            container.style.outline = "2px solid #ffd97a";
+        var qty = isCopy ? 1 : Math.min(Number(entry.qty) || 0, owned || 0);
+        if (qty <= 0) {
+            return { hold: "nothing to sell after what you keep" };
         }
-
-        var qty = entry.curve ? 1 : (entry.qty || 1);
-        if (price != null && inputs.price && !inputs.price.value) {
-            setField(inputs.price, price);
-            STATS.filled += 1;
-            FILLED.push({ name: entry.name, qty: qty, price: price });
-            container.setAttribute("data-tma-filled", "1");
-            console.log("[TornHoarder] filled " + entry.name + " x" + qty + " @" + price +
-                " (q=" + (quality != null ? quality.toFixed(2) : "n/a") + ", " + qualitySource + ")");
-            // Always set quantity: Torn may pre-fill your whole stack, but only
-            // the Selling part (owned minus what you keep) should be listed.
-            if (CFG.fillQty && inputs.qty) {
-                setField(inputs.qty, qty);
-            }
-        } else {
-            STATS.skipped += 1;
-            container.setAttribute("data-tma-skipped", "1");
-        }
-        paintHud();
-        window.__TMA__ = { version: VER, items: Object.keys(PRICE_MAP).length, stats: STATS };
+        return { price: price, qty: qty, plan: plan, quality: quality };
     }
 
-    function extract() {
-        if (document.hidden || scanning || !document.body) {
-            return;
+    // ---- Add Listing: one fixed button, one action per click ---------------
+    // Click 1 fills every planned row (switches to "View All" and scrolls the
+    // list, since Torn only renders rows near the screen). Click 2 presses
+    // Torn's ADD TO MARKET; click 3 confirms if Torn asks. Nothing is listed
+    // until you click, and the "anonymous (+10% fee)" box is never touched.
+    function listMode() {
+        var excluded = {};
+        var filled = {};
+        var held = {};
+        var phase = "plan";        // plan -> filling -> filled -> adding -> done
+        var loading = false;       // filling: getting Torn to load the whole tab
+        var currentTab = "";
+        var busyUntil = 0;
+        var panelSig = "";
+        var progress = 0;
+
+        var btn = document.createElement("button");
+        btn.id = "th-list-btn";
+        btn.type = "button";
+        btn.style.cssText =
+            "position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:999999;" +
+            "min-width:360px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
+            "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
+            "box-shadow:0 4px 14px rgba(0,0,0,.5);display:none;";
+        document.body.appendChild(btn);
+
+        var panel = document.createElement("div");
+        panel.id = "th-list-review";
+        panel.style.cssText =
+            "position:fixed;left:50%;bottom:136px;transform:translateX(-50%);z-index:999999;" +
+            "min-width:360px;max-width:560px;max-height:42vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
+            "background:rgba(0,0,0,.92);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;display:none;";
+        document.body.appendChild(panel);
+
+        function onAddListing() {
+            return /addListing/i.test(location.hash);
         }
-        scanning = true;
-        try {
-            var containers = [];
-            var list = document.querySelectorAll("[data-item]");
-            for (var i = 0; i < list.length; i++) {
-                var row = list[i].closest(".torn-item, li, tr, [class*='listing-item']");
-                if (row && containers.indexOf(row) === -1) {
-                    containers.push(row);
+
+        // What the app planned, before touching the page: one line per item.
+        function plannedLines() {
+            var lines = [];
+            Object.keys(PRICE_MAP).forEach(function (id) {
+                var e = PRICE_MAP[id];
+                var plan = e.plan;
+                var list = e.list;
+                if (plan === "shop") {
+                    if (SHOP.items[id] || !e.fallback) {
+                        return;
+                    }
+                    plan = e.fallback.plan;
+                    list = e.fallback.list;
+                }
+                if (!plan || plan === "keep") {
+                    return;
+                }
+                if (e.copies != null) {
+                    if (e.copies > 0) {
+                        lines.push({ id: id, name: e.name, qty: e.copies, value: e.estimate || 0, copies: true });
+                    }
+                } else if ((e.qty || 0) > 0 && list) {
+                    lines.push({ id: id, name: e.name, qty: e.qty, price: list, value: e.qty * list });
+                }
+            });
+            lines.sort(function (a, b) { return b.value - a.value; });
+            return lines;
+        }
+
+        function rowInfo(row) {
+            var img = row.querySelector("img");
+            var m = img && /items[/]([0-9]+)[/]/.exec(img.getAttribute("src") || "");
+            if (!m) {
+                return null;
+            }
+            var name = img.alt || "";
+            var select = row.querySelector("input[type=checkbox][aria-label^='Select ']");
+            var qtyBox = row.querySelector("input[aria-label$=' amount']");
+            var priceBox = row.querySelector("input[aria-label$=' price']");
+            var text = (row.innerText || "").split(NL).join(" ");
+            var rest = text.slice(text.indexOf(name) + name.length);
+            var dollar = rest.indexOf("$");
+            if (dollar >= 0) {
+                rest = rest.slice(0, dollar);
+            }
+            var nums = (rest.match(/[0-9]+[.][0-9]+/g) || []).map(Number);
+            var rolls = null;
+            if (select && nums.length >= 2) {
+                rolls = { damage: nums[0], accuracy: nums[1], armor: null };
+            } else if (select && nums.length === 1) {
+                rolls = { damage: null, accuracy: null, armor: nums[0] };
+            }
+            return {
+                id: m[1], name: name, select: select, qtyBox: qtyBox, priceBox: priceBox, rolls: rolls,
+                owned: qtyBox ? parseInt(qtyBox.getAttribute("data-money"), 10) || 0 : 1,
+                key: m[1] + "|" + nums.join("|")
+            };
+        }
+
+        // "View All" folds several copies of a weapon/armor into one row with an
+        // "Expand N <name> items" button; open the ones we plan to sell from.
+        function expandPlannedGroups() {
+            var planned = {};
+            plannedLines().forEach(function (l) {
+                if (!excluded[l.id]) {
+                    planned[PRICE_MAP[l.id].name] = true;
+                }
+            });
+            var opened = 0;
+            var buttons = document.querySelectorAll("button[aria-label^='Expand '][aria-expanded='false']");
+            for (var i = 0; i < buttons.length; i++) {
+                var m = /^Expand [0-9,]+ (.+) items?$/.exec(buttons[i].getAttribute("aria-label") || "");
+                if (m && planned[m[1]]) {
+                    buttons[i].click();
+                    opened += 1;
                 }
             }
-            STATS.rows = containers.length;
-            for (var j = 0; j < containers.length; j++) {
-                processRow(containers[j]);
-            }
-            window.__TMA__ = { version: VER, items: Object.keys(PRICE_MAP).length, stats: STATS };
-            paintHud();
-        } finally {
-            scanning = false;
+            return opened;
         }
+
+        function scanVisible() {
+            expandPlannedGroups();
+            var rows = document.querySelectorAll("[class*='itemRow___']");
+            for (var i = 0; i < rows.length; i++) {
+                var info = rowInfo(rows[i]);
+                if (!info || !info.priceBox) {
+                    continue;
+                }
+                var entry = PRICE_MAP[info.id];
+                if (!entry || excluded[info.id] || held[info.key]) {
+                    continue;
+                }
+                // A row that already has a price was filled (by us or by you).
+                // Copies can share identical rolls, so the row's own state, not
+                // its rolls, decides whether it still needs filling.
+                if (info.priceBox.value) {
+                    continue;
+                }
+                var d = planListing(info.id, entry, info.rolls, !!info.select, info.owned);
+                if (d.hold) {
+                    held[info.key] = { name: info.name, reason: d.hold };
+                    continue;
+                }
+                if (info.select) {
+                    if (!info.select.checked) {
+                        info.select.click();
+                    }
+                } else if (info.qtyBox) {
+                    setField(info.qtyBox, d.qty);
+                } else {
+                    continue;
+                }
+                setField(info.priceBox, d.price);
+                filled[info.key + "#" + Object.keys(filled).length] = { id: info.id, name: info.name, qty: d.qty, price: d.price };
+            }
+        }
+
+        function lastRowName() {
+            var imgs = document.querySelectorAll("[class*='itemRow___'] img, [class*='virtualListing___'] img");
+            return imgs.length ? imgs[imgs.length - 1].alt : "";
+        }
+
+        // Tabs holding something planned for sale. Category tabs list each
+        // weapon/armor copy on its own row; anything without a known tab is
+        // picked up by a final "View All" pass.
+        function plannedTabs() {
+            var tabs = [];
+            var needAll = false;
+            plannedLines().forEach(function (l) {
+                if (excluded[l.id]) {
+                    return;
+                }
+                var t = PRICE_MAP[l.id].tab;
+                if (!t || !document.querySelector("button[aria-label='View " + t + "']")) {
+                    needAll = true;
+                } else if (tabs.indexOf(t) === -1) {
+                    tabs.push(t);
+                }
+            });
+            if (needAll) {
+                tabs.push("All");
+            }
+            return tabs;
+        }
+
+        // For each planned tab: open it, let Torn load the whole list (it only
+        // shows ~80 rows and fetches more at the bottom), then scroll top to
+        // bottom filling rows; stop at the bottom once the list stops growing.
+        function fillAll() {
+            phase = "filling";
+            var tabs = plannedTabs();
+            function nextTab() {
+                if (!tabs.length) {
+                    window.scrollTo(0, 0);
+                    currentTab = "";
+                    phase = "filled";
+                    render();
+                    return;
+                }
+                currentTab = tabs.shift();
+                var tabBtn = document.querySelector("button[aria-label='View " + currentTab + "']");
+                if (!tabBtn) {
+                    nextTab();
+                    return;
+                }
+                if (tabBtn.getAttribute("aria-selected") !== "true") {
+                    tabBtn.click();
+                }
+                window.scrollTo(0, 0);
+                setTimeout(function () {
+                    loading = true;
+                    loadAll(fillPass);
+                }, 1200);
+            }
+            function loadAll(done) {
+                var stalls = 0;
+                var lastSig = "";
+                function nudge() {
+                    var h = document.documentElement.scrollHeight;
+                    if (h <= window.innerHeight + 50) {
+                        loading = false;
+                        done();
+                        return;
+                    }
+                    window.scrollTo(0, Math.max(h - window.innerHeight - 300, 0));
+                    setTimeout(function () {
+                        window.scrollTo(0, document.documentElement.scrollHeight);
+                        setTimeout(function () {
+                            var sig = document.documentElement.scrollHeight + "|" + lastRowName();
+                            stalls = sig === lastSig ? stalls + 1 : 0;
+                            lastSig = sig;
+                            render();
+                            if (stalls >= 2) {
+                                loading = false;
+                                window.scrollTo(0, 0);
+                                setTimeout(done, 500);
+                            } else {
+                                nudge();
+                            }
+                        }, 1000);
+                    }, 200);
+                }
+                nudge();
+            }
+            function fillPass() {
+                var bottomChecks = 0;
+                function step() {
+                    scanVisible();
+                    progress = Object.keys(filled).length;
+                    render();
+                    var bottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 5;
+                    if (bottom) {
+                        bottomChecks += 1;
+                        if (bottomChecks >= 2) {
+                            nextTab();
+                            return;
+                        }
+                        setTimeout(step, 500);
+                        return;
+                    }
+                    bottomChecks = 0;
+                    window.scrollBy(0, Math.floor(window.innerHeight * 0.7));
+                    setTimeout(step, 350);
+                }
+                step();
+            }
+            nextTab();
+        }
+
+        // Torn's own running total: "You are adding N items across M categories for a total of $X"
+        function tornTotals() {
+            var els = document.querySelectorAll("div, p, span");
+            for (var i = els.length - 1; i >= 0; i--) {
+                var t = (els[i].innerText || "").trim();
+                var m = /^You are adding ([0-9,]+) items? across [0-9,]+ categor(?:y|ies) for a total of [$]([0-9,]+)/.exec(t);
+                if (m) {
+                    return { items: parseInt(m[1].replace(/,/g, ""), 10), total: parseInt(m[2].replace(/,/g, ""), 10) };
+                }
+            }
+            return null;
+        }
+
+        function addButton() {
+            var all = document.querySelectorAll("button");
+            for (var i = 0; i < all.length; i++) {
+                if (/^ *ADD TO MARKET *$/i.test(all[i].textContent || "") && all[i] !== btn) {
+                    return all[i];
+                }
+            }
+            return null;
+        }
+
+        // A confirmation Torn may show after ADD TO MARKET.
+        function confirmButton() {
+            var add = addButton();
+            var all = document.querySelectorAll("button, a, input[type=button], input[type=submit]");
+            for (var i = 0; i < all.length; i++) {
+                var el = all[i];
+                if (el === btn || el === add || el.offsetParent === null || panel.contains(el)) {
+                    continue;
+                }
+                var text = (el.textContent || el.value || "").trim();
+                if (!/^(yes|confirm|add|list|add to market|list items)$/i.test(text)) {
+                    continue;
+                }
+                var box = el;
+                for (var up = 0; up < 5 && box && !/are you sure|confirm/i.test(box.textContent || ""); up++) {
+                    box = box.parentElement;
+                }
+                if (box && /are you sure|confirm/i.test(box.textContent || "")) {
+                    return el;
+                }
+            }
+            return null;
+        }
+
+        function line(text, style, onClick) {
+            var div = document.createElement("div");
+            div.textContent = text;
+            div.style.cssText = style || "";
+            if (onClick) {
+                div.style.cursor = "pointer";
+                div.addEventListener("click", onClick);
+            }
+            panel.appendChild(div);
+        }
+
+        function renderPanel() {
+            var sig;
+            if (phase === "plan") {
+                var lines = plannedLines();
+                sig = "plan:" + ((tornTotals() || {}).items || 0) + ":" + lines.map(function (l) { return l.id + (excluded[l.id] ? "x" : ""); }).join(",");
+                if (sig === panelSig) {
+                    return;
+                }
+                panelSig = sig;
+                panel.textContent = "";
+                var total = 0;
+                lines.forEach(function (l) {
+                    if (!excluded[l.id]) {
+                        total += l.value;
+                    }
+                });
+                var already = tornTotals();
+                if (already && already.items > 0) {
+                    line("Torn already has " + already.items.toLocaleString("en-US") + " item(s) selected from before. " +
+                        "Clear them first with Torn's Clear all, so you only add what you planned.", "color:#ffb74d;margin-bottom:6px;");
+                }
+                line("Planned listings (" + lines.length + " items, about " + fmtMoney(total) + "). Click a line to leave it out:",
+                    "color:#9ccc65;margin-bottom:4px;");
+                lines.forEach(function (l) {
+                    var x = excluded[l.id];
+                    var text = (x ? "✕ " : "✓ ") + l.qty.toLocaleString("en-US") + " × " + l.name +
+                        (l.copies ? " (priced per copy, about " + fmtMoney(l.value) + ")" : " @ " + fmtMoney(l.price) + " = " + fmtMoney(l.value));
+                    line(text, x ? "text-decoration:line-through;color:#888;" : "", function () {
+                        excluded[l.id] = !excluded[l.id];
+                        render();
+                    });
+                });
+                return;
+            }
+            var keys = Object.keys(filled);
+            var hkeys = Object.keys(held);
+            var tt = tornTotals();
+            sig = phase + ":" + keys.length + ":" + hkeys.length + ":" + (tt ? tt.items : "");
+            if (sig === panelSig) {
+                return;
+            }
+            panelSig = sig;
+            panel.textContent = "";
+            var byName = {};
+            var order = [];
+            keys.forEach(function (k) {
+                var f = filled[k];
+                if (!byName[f.name]) {
+                    byName[f.name] = { qty: 0, value: 0, min: f.price, max: f.price };
+                    order.push(f.name);
+                }
+                var g = byName[f.name];
+                g.qty += f.qty;
+                g.value += f.qty * f.price;
+                g.min = Math.min(g.min, f.price);
+                g.max = Math.max(g.max, f.price);
+            });
+            order.sort(function (a, b) { return byName[b].value - byName[a].value; });
+            line((phase === "filling" ? "Filling… " : "Filled ") + keys.length + " row(s):", "color:#9ccc65;margin-bottom:4px;");
+            order.forEach(function (n) {
+                var g = byName[n];
+                var each = g.min === g.max ? fmtMoney(g.min) : fmtMoney(g.min) + " to " + fmtMoney(g.max);
+                line("  " + g.qty.toLocaleString("en-US") + " × " + n + " @ " + each + " = " + fmtMoney(g.value));
+            });
+            if (hkeys.length) {
+                line("Held back " + hkeys.length + " row(s):", "color:#ffb74d;margin-top:6px;");
+                hkeys.forEach(function (k) {
+                    line("  " + held[k].name + ": " + held[k].reason, "color:#bbb;");
+                });
+            }
+            if (phase === "filled") {
+                var ours = keys.reduce(function (n, k) { return n + filled[k].qty; }, 0);
+                if (tt && tt.items !== ours) {
+                    line("Check before adding: Torn has " + tt.items.toLocaleString("en-US") + " item(s) selected but TornHoarder filled " +
+                        ours.toLocaleString("en-US") + ". The difference is selections from before or ones you made.",
+                        "color:#ffb74d;margin-top:6px;");
+                }
+                line("Start over (clears Torn's selections)", "color:#64b5f6;margin-top:6px;text-decoration:underline;", startOver);
+            }
+        }
+
+        function startOver() {
+            var clear = Array.prototype.filter.call(document.querySelectorAll("a, button, span"), function (e) {
+                return /^Clear all$/i.test((e.textContent || "").trim());
+            })[0];
+            if (clear) {
+                clear.click();
+            }
+            filled = {};
+            held = {};
+            phase = "plan";
+            panelSig = "";
+            render();
+        }
+
+        function render() {
+            var show = onAddListing();
+            btn.style.display = show ? "block" : "none";
+            panel.style.display = show ? "block" : "none";
+            if (!show) {
+                return;
+            }
+            renderPanel();
+            var totals = tornTotals();
+            var c = confirmButton();
+            if (phase === "filling") {
+                btn.textContent = (loading ? "Loading " : "Filling ") + currentTab + "… " + progress + " row(s) filled";
+            } else if (Date.now() < busyUntil) {
+                btn.textContent = "Adding…";
+            } else if (c) {
+                btn.textContent = "Confirm: add " + (totals ? totals.items : "") + " listing(s)";
+            } else if (phase === "plan") {
+                var lines = plannedLines().filter(function (l) { return !excluded[l.id]; });
+                btn.textContent = lines.length ? "Fill " + lines.length + " item(s) for listing" : "Nothing planned to list";
+            } else if (totals && totals.items > 0) {
+                btn.textContent = "Add " + totals.items.toLocaleString("en-US") + " listing(s) to market · " + fmtMoney(totals.total);
+            } else if (phase === "adding" || phase === "done") {
+                btn.textContent = "Listed ✓";
+                phase = "done";
+            } else {
+                btn.textContent = "Nothing filled. Start over below";
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (phase === "filling" || Date.now() < busyUntil) {
+                return;
+            }
+            var c = confirmButton();
+            if (c) {
+                busyUntil = Date.now() + 2500;
+                c.click();
+                render();
+                return;
+            }
+            if (phase === "plan") {
+                fillAll();
+                return;
+            }
+            var totals = tornTotals();
+            var add = addButton();
+            if (phase === "filled" && totals && totals.items > 0 && add && !add.disabled) {
+                phase = "adding";
+                busyUntil = Date.now() + 2500;
+                add.click();
+                render();
+            }
+        });
+
+        window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups };
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] list mode v" + VER + ": " + plannedLines().length + " item(s) planned");
     }
 
     // ---- Shop run: one fixed button, one action per click -----------------
@@ -690,12 +980,9 @@ TEMPLATE = """\
         return;
     }
 
-    console.log("[TornHoarder] autofill v" + VER + " loaded, " + Object.keys(PRICE_MAP).length + " items priced");
-    setTimeout(extract, 2500);
-    var timer = setInterval(extract, Number(CFG.scanMs) || 1500);
-    window.addEventListener("beforeunload", function () {
-        clearInterval(timer);
-    });
+    if (location.pathname.indexOf("/page.php") === 0 && /sid=ItemMarket/i.test(location.search)) {
+        listMode();
+    }
 })();
 """
 

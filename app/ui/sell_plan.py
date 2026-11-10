@@ -42,6 +42,19 @@ def _num(v):
     return None if v is None or (isinstance(v, float) and pd.isna(v)) else v
 
 
+# Add Listing page tab ("View <label>") for each user/inventory category.
+# Category tabs list every weapon/armor copy on its own row ("View All" folds
+# copies into groups), so the userscript fills tab by tab.
+LISTING_TABS = {
+    "Primary": "Primary", "Secondary": "Secondary", "Melee": "Melee", "Temporary": "Temporary",
+    "Defensive": "Armor", "Clothing": "Clothing", "Medical": "Medical", "Drug": "Drugs",
+    "Energy Drink": "Energy Drinks", "Alcohol": "Alcohol", "Candy": "Candy", "Supply Pack": "Supply Packs",
+    "Booster": "Boosters", "Enhancer": "Enhancers", "Tool": "Tools", "Material": "Materials",
+    "Jewelry": "Jewelry", "Flower": "Flowers", "Plushie": "Plushies", "Car": "Cars",
+    "Artifact": "Artifacts", "Special": "Special", "Other": "Miscellaneous", "Collectible": "Collectibles",
+}
+
+
 def is_sellable(profile: dict, rules: SellRules) -> bool:
     """Only items in a chosen sell category get a market/shop plan; unknown -> keep."""
     return inventory_category_for_profile(profile) in rules.sell_categories
@@ -87,9 +100,14 @@ def plan_rows(
         reserve, keep_why = keep_by_item[iid]
         keeping = (1 if idx in kept_copies else 0) if ro.get("is_stat") else min(reserve, qty)
         selling = qty - keeping
+        fast = _num(ro.get("Fast-sell price"))
+        if ro.get("is_stat") and _num(summ.get("fast_sell_price")):
+            # A copy's quality-curve price can rest on one cheap listing in a thin
+            # band; no copy is worth less than the item's cheapest listing.
+            fast = max(fast or 0, _num(summ.get("fast_sell_price")))
         kwargs = dict(
             qty=selling,
-            fast=_num(ro.get("Fast-sell price")),
+            fast=fast,
             fair=_num(ro.get("Fair price")),
             greedy=_num(ro.get("Greedy price")),
             shop_price=shop_price_for(prof, iid, known),
@@ -171,6 +189,7 @@ def item_plans(
         d = decide(**kwargs, shop_price=shop_price, override=overrides.get(iid))
         shop_min, ref_min = price_guards(shop_price, prof.get("market_price"))
         plans[iid] = {
+            "tab": LISTING_TABS.get(inventory_category_for_profile(prof)),
             "plan": d.plan,
             "auto": d.auto,
             "list": d.price,
@@ -198,6 +217,11 @@ def item_plans(
             if not entry["qty"]:
                 entry["plan"] = "keep"
             continue
+        # For the Add Listing review: how many copies are up for sale and
+        # roughly what they'll list for (the script re-prices each from its rolls).
+        selling = rows[rows["Keeping"] == 0]
+        entry["copies"] = int(len(selling))
+        entry["estimate"] = int(sum(_num(p) or 0 for p in selling["List price"]))
         kept = rows[rows["Keeping"] > 0]
         if len(kept) == len(rows):
             entry["plan"] = "keep"
@@ -351,6 +375,7 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     _render_totals(edited)
     shop_run = build_shop_run(shop_rows(edited), profiles, known)
     _render_shop_run(shop_run)
+    _render_market_run(edited)
 
     return {
         "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known),
@@ -421,4 +446,27 @@ def _render_shop_run(shop_run: dict) -> None:
         "Needs the autofill script from this run (Autofill script tab). On each shop page one button sits in the "
         "same spot: click it to sell this shop's items, then again for the next shop. Only Shop-plan items are "
         "filled; weapon/armor copies are matched one by one, so a high-roll copy is never sold to a shop."
+    )
+
+
+ADD_LISTING_URL = "https://www.torn.com/page.php?sid=ItemMarket#/addListing"
+
+
+def _render_market_run(edited: pd.DataFrame) -> None:
+    market = edited[edited["Plan"].isin([PLAN_LABELS[p] for p in ("dump", "competitive", "top")]) & (edited["Selling"] > 0)]
+    if market.empty:
+        st.caption("Nothing to list on the Item Market.")
+        return
+    units = int(market["Selling"].sum())
+    total = float(market.apply(_row_proceeds, axis=1).sum())
+    st.markdown(
+        f"**Market listings**: {units:,} items ({market['item_id'].nunique()} kinds) · about ${total:,.0f} after the "
+        f"{MARKET_FEE:.0%} tax"
+    )
+    st.markdown(f"[**Open Add Listing →**]({ADD_LISTING_URL})")
+    st.caption(
+        "Do the shop run first. On Add Listing, the green button shows the planned listings (click a line to leave it "
+        "out), then **Fill** goes tab by tab filling quantity and price for every planned row (weapon/armor priced from "
+        "each copy's rolls; Keep, crime items and your best copies are left alone). Check the list, then **Add** presses "
+        "Torn's ADD TO MARKET. Nothing is listed until you click."
     )

@@ -57,7 +57,8 @@ class UserscriptTest(unittest.TestCase):
         self.assertEqual((decoded["641"]["plan"], decoded["641"]["list"], decoded["641"]["qty"]), ("dump", 760, 3))
         self.assertIn('"dumpUndercutPct": 7.0', out)
         self.assertIn('"topMinQuality": 50.0', out)
-        self.assertIn('plan === "keep" || plan === "shop"', out)
+        self.assertIn("function planListing(", out)
+        self.assertIn("function plannedTabs(", out)
 
 
     def test_version_comes_from_the_package(self):

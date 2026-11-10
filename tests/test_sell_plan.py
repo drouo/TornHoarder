@@ -15,7 +15,7 @@ from streamlit.testing.v1 import AppTest
 from app.ui.sell_plan import item_plans, overrides_from_edit, plan_rows
 from tma import config
 from tma.crime_items import crime_hint, parse_oc_items
-from tma.sell_plan import MARKET_FEE, SellRules, auto_plan, decide, price_guards, reserve_for
+from tma.sell_plan import KEEP_ALL, MARKET_FEE, SellRules, auto_plan, decide, price_guards, reserve_for
 
 RULES = SellRules()
 HARNESS = Path(__file__).resolve().parent / "fixtures" / "render_results_harness.py"
@@ -155,14 +155,22 @@ OC = {"1350": {"name": "ID Badge", "consumed": True, "crimes": ["Pet Project", "
       "1203": {"name": "Lockpicks", "consumed": False, "crimes": ["Smoke and Wing Mirrors"]}}
 
 
+STOCK = SellRules(keep_all_crime_items=False)
+
+
 class ReserveTest(unittest.TestCase):
-    def test_oc_consumables_keep_three_tools_keep_one(self):
-        self.assertEqual(reserve_for(1350, {}, "Material", RULES, OC)[0], 3)
-        self.assertEqual(reserve_for(1203, {}, "Tool", RULES, OC)[0], 1)
-        self.assertIn("needed for OC: Pet Project, Market Forces…", reserve_for(1350, {}, "Material", RULES, OC)[1])
+    def test_crime_items_are_all_kept_by_default(self):
+        self.assertEqual(reserve_for(1350, {}, "Material", RULES, OC),
+                         (KEEP_ALL, "crime item (OC: Pet Project, Market Forces…)"))
+        self.assertEqual(reserve_for(906, {"crime_hint": True}, "Tool", RULES, {}), (KEEP_ALL, "crime item (used in crimes)"))
+
+    def test_with_keep_all_off_oc_consumables_keep_three_tools_keep_one(self):
+        self.assertEqual(reserve_for(1350, {}, "Material", STOCK, OC)[0], 3)
+        self.assertEqual(reserve_for(1203, {}, "Tool", STOCK, OC)[0], 1)
+        self.assertIn("needed for OC: Pet Project, Market Forces…", reserve_for(1350, {}, "Material", STOCK, OC)[1])
 
     def test_crime_items_and_keep_one_categories(self):
-        self.assertEqual(reserve_for(906, {"crime_hint": True}, "Tool", RULES, {}), (1, "used in crimes"))
+        self.assertEqual(reserve_for(906, {"crime_hint": True}, "Tool", STOCK, {}), (1, "used in crimes"))
         self.assertEqual(reserve_for(400, {}, "Clothing", RULES, {}), (1, "keep 1 of each Clothing"))
         self.assertEqual(reserve_for(400, {}, "Other", RULES, {}), (0, ""))
 
@@ -199,12 +207,16 @@ class PlanRowsReserveTest(unittest.TestCase):
                 "8": {"id": 8, "type": "Weapon", "category": "Melee"}}
 
     def test_stacks_sell_only_the_surplus(self):
-        rows = plan_rows([_row(624, "Bikini", 7), _row(1350, "ID Badge", 2)], {}, {}, self.PROFILES, RULES, {}, oc_items=OC)
+        rows = plan_rows([_row(624, "Bikini", 7), _row(1350, "ID Badge", 40)], {}, {}, self.PROFILES, RULES, {}, oc_items=OC)
         bikini, badge = rows
         self.assertEqual((bikini["Keeping"], bikini["Selling"]), (1, 6))
         self.assertIn("keeping 1 (keep 1 of each Clothing)", bikini["Why"])
-        self.assertEqual((badge["Keeping"], badge["Selling"], badge["Plan"]), (2, 0, "Keep"))
-        self.assertIn("keeping all 2: needed for OC", badge["Why"])
+        # Crime items: all kept by default, however many you have.
+        self.assertEqual((badge["Keeping"], badge["Selling"], badge["Plan"]), (40, 0, "Keep"))
+        self.assertIn("keeping all 40: crime item (OC:", badge["Why"])
+        # With keep-all off, only the stock of 3 stays.
+        badge = plan_rows([_row(1350, "ID Badge", 40)], {}, {}, self.PROFILES, STOCK, {}, oc_items=OC)[0]
+        self.assertEqual((badge["Keeping"], badge["Selling"]), (3, 37))
 
     def test_weapons_keep_the_best_copies(self):
         rows_out = [_row(8, "Axe", 1, True, "a"), _row(8, "Axe", 1, True, "b"), _row(8, "Axe", 1, True, "c")]

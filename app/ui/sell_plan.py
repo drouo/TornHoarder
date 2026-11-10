@@ -20,6 +20,7 @@ from tma.config import load_reserves, load_sell_prefs, save_reserves, save_sell_
 from tma.crime_items import load_oc_items
 from tma.inventory import inventory_category_for_profile
 from tma.sell_plan import (
+    KEEP_ALL,
     LABEL_TO_PLAN,
     MARKET_FEE,
     PLAN_LABELS,
@@ -102,7 +103,10 @@ def plan_rows(
         d: Decision = decide(**kwargs, override=overrides.get(iid)) if iid in overrides else auto
         why = d.reason
         if keeping and not selling:
-            what = "your best copy" if ro.get("is_stat") else f"all {qty:,}"
+            if ro.get("is_stat"):
+                what = "every copy" if reserve >= KEEP_ALL else "your best copy"
+            else:
+                what = f"all {qty:,}"
             auto = d = Decision("keep", f"keeping {what}: {keep_why}", None, 0.0, True)
             why = d.reason
         elif keeping:
@@ -250,6 +254,12 @@ def _render_rules(saved: dict) -> SellRules:
                 key="rule_thin",
             )
         st.markdown("**Always keep** (only the surplus is ever sold)")
+        keep_crime = st.checkbox(
+            "Keep all crime items (Organized Crime requirements and anything a crime uses)",
+            value=bool(base.keep_all_crime_items),
+            key="rule_keep_crime",
+        )
+        st.caption("Untick to keep only a stock of each and sell the rest:")
         k1, k2, k3 = st.columns(3)
         with k1:
             oc_tool = st.number_input("OC tools (reusable)", 0, 50, int(base.oc_tool_keep), 1, key="rule_oc_tool")
@@ -277,6 +287,7 @@ def _render_rules(saved: dict) -> SellRules:
         top_min_quality=float(quality),
         thin_market_listings=int(thin),
         keep_one_categories=tuple(keep_one),
+        keep_all_crime_items=bool(keep_crime),
         oc_tool_keep=int(oc_tool),
         oc_consumable_keep=int(oc_used),
         crime_hint_keep=int(hint),

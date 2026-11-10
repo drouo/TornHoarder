@@ -89,8 +89,7 @@ The thresholds can be changed under **Rules**. The autofill script fills each ro
 
 Only the surplus is ever sold. The **Keeping** column on the Sell plan tab shows how many of each item stay in your inventory; type a number there to set it by hand. The defaults:
 
-- **Organized Crime items** come from Torn's `torn/organizedcrimes` list. Keep 1 of each reusable tool (Lockpicks, Jemmy, Wire Cutters…) and 3 of each item a crime uses up (ID Badge, Zip Ties, C4…).
-- **Other crime items** are ones whose in-game effect says a crime uses them (Forgery, Disposal, Graffiti, Arson…). Keep 1.
+- **Crime items are all kept** by default: everything an Organized Crime requires (from Torn's `torn/organizedcrimes` list) and everything whose in-game effect says a crime uses it (Forgery, Disposal, Graffiti, Arson…). Untick **Keep all crime items** under Rules to keep only a stock and sell the rest: 1 of each reusable OC tool, 3 of each item an OC uses up, and 1 of other crime items.
 - **Clothing and Collectibles**: keep 1 of each, so only duplicates are sold.
 - **Weapons and armor**: the copies kept are your best by quality.
 

@@ -75,6 +75,7 @@ class SellRules:
     sell_categories: tuple[str, ...] = DEFAULT_SELL_CATEGORIES
     # How many to keep before anything is sold (see reserve_for).
     keep_one_categories: tuple[str, ...] = ("Clothing", "Collectible")
+    keep_all_crime_items: bool = True
     oc_tool_keep: int = 1
     oc_consumable_keep: int = 3
     crime_hint_keep: int = 1
@@ -94,6 +95,10 @@ class SellRules:
         return cls(**known)
 
 
+# "Keep every one": larger than any stack, so min(reserve, owned) keeps them all.
+KEEP_ALL = 10**9
+
+
 def reserve_for(
     item_id: int,
     profile: Optional[dict],
@@ -102,13 +107,18 @@ def reserve_for(
     oc_items: Optional[dict] = None,
     override: Optional[int] = None,
 ) -> tuple[int, str]:
-    """How many of an item to keep, and why. Your per-item number wins; otherwise the largest of:
-    Organized Crime items (reusable tools vs consumed items), items whose description says a
-    crime uses them, and keep-one categories (e.g. one of every Clothing item)."""
+    """How many of an item to keep, and why. Your per-item number wins; otherwise:
+    crime items (Organized Crime requirements, or items whose effect says a crime uses them)
+    are all kept when keep_all_crime_items is on, else kept up to their per-kind numbers;
+    keep-one categories (e.g. one of every Clothing item) keep 1."""
     if override is not None:
         return max(int(override), 0), "your choice"
     keep, why = 0, ""
     oc = (oc_items or {}).get(str(item_id))
+    if rules.keep_all_crime_items and (oc or (profile or {}).get("crime_hint")):
+        crimes = (oc or {}).get("crimes") or []
+        what = ("OC: " + ", ".join(crimes[:2]) + ("…" if len(crimes) > 2 else "")) if oc else "used in crimes"
+        return KEEP_ALL, f"crime item ({what})"
     if oc:
         n = rules.oc_consumable_keep if oc.get("consumed") else rules.oc_tool_keep
         crimes = oc.get("crimes") or []

@@ -157,6 +157,7 @@ def render_pricing_table(an: dict) -> dict:
                         "Accuracy %": cstats["accuracy"],
                         "Armor": cstats["armor"],
                         "quality": quality,
+                        "uid": copy.uid if copy else None,
                         "is_stat": True,
                         "payload": payload,
                     }

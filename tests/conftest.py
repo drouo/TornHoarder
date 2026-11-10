@@ -50,3 +50,12 @@ def isolate_autofill_output(tmp_path, monkeypatch):
 
     monkeypatch.setattr(autofill_export, "AUTOFILL_PATH", tmp_path / "tma_autofill.user.js")
     monkeypatch.setattr(autofill_export, "_ensure_update_server", lambda *a, **k: (False, "http://test/"))
+
+
+@pytest.fixture(autouse=True)
+def isolate_shop_knowledge(tmp_path, monkeypatch):
+    """The Sell plan tab reads data/shop_buys.json (learned from real shop
+    runs); tests must neither depend on nor touch the user's copy."""
+    from app.ui import sell_plan
+
+    monkeypatch.setattr(sell_plan, "SHOP_BUYS_PATH", tmp_path / "shop_buys.json")

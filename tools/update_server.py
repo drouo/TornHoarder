@@ -29,7 +29,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
-    server = build_server(DATA_DIR / SCRIPT_NAME, port=args.port)
+    server = build_server(DATA_DIR / SCRIPT_NAME, port=args.port, reports_path=DATA_DIR / "shop_buys.json")
     print(f"Update server listening on http://127.0.0.1:{args.port}/{SCRIPT_NAME}")
     try:
         server.serve_forever()

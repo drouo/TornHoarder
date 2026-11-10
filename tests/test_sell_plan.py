@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app.ui.sell_plan import overrides_from_edit
+from app.ui.sell_plan import item_plans, overrides_from_edit
 from tma import config
 from tma.sell_plan import MARKET_FEE, SellRules, auto_plan, decide, price_guards
 
@@ -133,6 +133,20 @@ class SellCategoryTest(unittest.TestCase):
     def test_defaults_never_sell_consumables(self):
         for cat in ("Drug", "Medical", "Booster", "Energy Drink", "Supply Pack", "Book", "Temporary"):
             self.assertNotIn(cat, SellRules().sell_categories)
+
+
+class ShopFallbackTest(unittest.TestCase):
+    def test_shop_item_carries_its_market_plan_for_the_add_listing_page(self):
+        summary = pd.DataFrame([{"item_id": 1483, "my_quantity": 431, "fast_sell_price": 8999.0, "fair_price": 17298.0,
+                                 "greedy_price": 19000.0, "num_clean_listings": 100}])
+        edited = pd.DataFrame([{"item_id": 1483, "is_stat": False, "List price": 9000, "Qty": 431}])
+        profiles = {"1483": {"id": 1483, "name": "Insulin", "type": "Other", "vendor": "Pharmacy", "sell_price": 9000}}
+        plan = item_plans(summary, edited, profiles, RULES, {})[1483]
+        self.assertEqual(plan["plan"], "shop")
+        # Not sold to the Pharmacy -> its market plan (a $7.4M stack, so Competitive
+        # at floor - $1), with no shop floor applied.
+        self.assertEqual(plan["fallback"]["plan"], "competitive")
+        self.assertEqual(plan["fallback"]["list"], 8999)
 
 
 class SellRulesTest(unittest.TestCase):

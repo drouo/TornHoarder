@@ -77,6 +77,16 @@ The thresholds can be changed under **Rules**. The autofill script fills each ro
 
 
 
+### 6) Shop run
+
+Shop-plan items are sold to city shops with one button. **Start shop run →** on the Sell plan tab opens the first shop. On every shop page the userscript puts one green button in the same spot:
+
+1. **Sell N item(s) here · $X**: fills only this run's Shop items (weapon/armor copies matched by their armoryID) and opens Torn's "Are you sure?" with the total.
+2. **Confirm: sell …**: confirms that one sale.
+3. **Next: <shop> →**: goes to the next shop, until **Shop run done ✓**.
+
+Each shop page also reports what it really lists back to the app's local server (`POST 127.0.0.1:9999/shop-report`, stored in `data/shop_buys.json`). The catalog's vendor is only a guess, and Big Al's, for example, buys a few of the weapons it stocks. Later runs route items only to shops seen buying them. Shop-plan items still in your inventory on the Add Listing page are listed with their market plan instead.
+
 ## Project structure
 
 ```

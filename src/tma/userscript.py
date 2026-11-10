@@ -7,12 +7,16 @@ TEMPLATE = """\
 // ==UserScript==
 // @name         TMA Autofill - Torn Item Market
 // @namespace    torn-market-analyzer
-// @version      0.3.3
-// @description  Fills Add Listing prices from the TMA app using the market's quality curve for weapons/armor.
+// @version      0.5.0
+// @description  Fills Add Listing prices from the TMA app and runs one-button city shop sales.
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
+// @match        https://www.torn.com/shops.php*
+// @match        https://www.torn.com/bigalgunshop.php*
 // @updateURL    http://127.0.0.1:9999/tma_autofill.user.js
 // @downloadURL  http://127.0.0.1:9999/tma_autofill.user.js
 // @run-at       document-idle
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // ==/UserScript==
 
 (function () {
@@ -21,6 +25,7 @@ TEMPLATE = """\
     var PRICE_MAP = __PRICE_MAP__;
     var BASE_STATS = __BASE_STATS__;
     var CFG = __CFG__;
+    var SHOP = __SHOP__;
 
     var NAME_TO_ID = {};
     Object.keys(PRICE_MAP).forEach(function (itemId) {
@@ -39,7 +44,7 @@ TEMPLATE = """\
 
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
-        : "0.3.3";
+        : "0.5.0";
     var STATS = { rows: 0, filled: 0, skipped: 0, held: 0, unmatched: 0 };
     var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
     var UNKNOWN = {};
@@ -239,6 +244,17 @@ TEMPLATE = """\
         // Sell plan from the app; an automatic plan is bumped to "top" for a
         // high-roll copy, since the app can't tell which row is which copy.
         var plan = entry.plan || null;
+        var listPrice = entry.list;
+        var shopMin = entry.shopMin;
+        var refMin = entry.refMin;
+        if (plan === "shop" && entry.fallback) {
+            // Still in inventory, so no shop took it (or the shop run hasn't
+            // been done): list it with its market plan, without the shop floor.
+            plan = entry.fallback.plan;
+            listPrice = entry.fallback.list;
+            shopMin = null;
+            refMin = entry.fallback.refMin;
+        }
         if (plan && plan !== "keep" && entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
             plan = "top";
         }
@@ -257,19 +273,19 @@ TEMPLATE = """\
         if (curvePrice != null && plan === "dump") {
             curvePrice = Math.max(Math.round(curvePrice * (1 - CFG.dumpUndercutPct / 100)), 1);
         }
-        var fallback = entry.list != null ? entry.list : (entry[basis] || null);
-        var price = curvePrice != null && curvePrice > 0 ? curvePrice : fallback;
+        var basePrice = listPrice != null ? listPrice : (entry[basis] || null);
+        var price = curvePrice != null && curvePrice > 0 ? curvePrice : basePrice;
         if (!plan && price != null && quality != null && quality >= CFG.premiumThreshold && curvePrice == null) {
             price = Math.max(price, Math.round(price * premiumFor(quality)));
         }
         // Same guards as the app: never list under what a shop pays after
         // tax, and leave anything under half Torn's reference price for a
         // manual look (a stray $1 listing can drag a curve bucket down).
-        if (price != null && entry.shopMin) {
-            price = Math.max(price, entry.shopMin);
+        if (price != null && shopMin) {
+            price = Math.max(price, shopMin);
         }
-        if (price != null && entry.refMin && price < entry.refMin) {
-            console.log("[TMA] held " + entry.name + " @" + price + ": under refMin " + entry.refMin);
+        if (price != null && refMin && price < refMin) {
+            console.log("[TMA] held " + entry.name + " @" + price + ": under refMin " + refMin);
             STATS.held += 1;
             container.setAttribute("data-tma-skipped", "1");
             container.style.outline = "2px dashed #e53935";
@@ -322,7 +338,239 @@ TEMPLATE = """\
         }
     }
 
+    // ---- Shop run: one fixed button, one action per click -----------------
+    // Click 1 on a shop page fills the amounts for this run's Shop items and
+    // presses Torn's own SELL ITEMS (a single sale). If Torn asks to confirm,
+    // the same button confirms. When nothing of ours is left on the page it
+    // becomes "Next shop". It never fills an item that isn't in SHOP.items,
+    // and weapon/armor copies only by their armoryID.
+    function shopMode() {
+        // shops.php?step=pharmacy -> "pharmacy"; bigalgunshop.php -> "bigalgunshop"
+        var stepMatch = /[?&]step=([a-z]+)/.exec(location.search);
+        var step = stepMatch ? stepMatch[1] : location.pathname.replace(/^[/]|[.]php$/g, "");
+        var route = SHOP.route || [];
+        var busyUntil = 0;
+        var note = "";
+
+        var btn = document.createElement("button");
+        btn.id = "tma-shop-btn";
+        btn.type = "button";
+        btn.style.cssText =
+            "position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:999999;" +
+            "min-width:340px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
+            "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
+            "box-shadow:0 4px 14px rgba(0,0,0,.5);";
+        document.body.appendChild(btn);
+
+        function ourRows() {
+            var rows = [];
+            var ids = document.querySelectorAll("input[type=hidden][name=ID]");
+            for (var i = 0; i < ids.length; i++) {
+                var li = ids[i].closest("li");
+                var want = SHOP.items[ids[i].value];
+                if (!li || !want) {
+                    continue;
+                }
+                var armory = li.querySelector("input[name=armoryID]");
+                if (want.uids && (!armory || want.uids.indexOf(armory.value) === -1)) {
+                    continue;
+                }
+                // Most shops: an amount box per item. Big Al's: a checkbox per copy.
+                var box = li.querySelector("input.input-money:not([type=hidden]), input[type=checkbox][name=amount]");
+                if (!box) {
+                    continue;
+                }
+                var have = box.type === "checkbox" ? 1 : parseInt(box.getAttribute("data-money"), 10) || 0;
+                var qty = want.uids ? have : Math.min(have, want.qty);
+                if (qty > 0) {
+                    rows.push({ li: li, box: box, qty: qty, price: Number(want.price) || 0 });
+                }
+            }
+            return rows;
+        }
+
+        function setAmount(row) {
+            if (row.box.type === "checkbox") {
+                if (!row.box.checked) {
+                    row.box.click();
+                }
+                row.li.style.outline = "2px solid #43a047";
+                return;
+            }
+            row.box.value = String(row.qty);
+            ["input", "keyup", "change"].forEach(function (ev) {
+                row.box.dispatchEvent(new Event(ev, { bubbles: true }));
+            });
+            var hidden = row.li.querySelector("input[type=hidden][name=amount]");
+            if (hidden) {
+                hidden.value = String(row.qty);
+            }
+            row.li.style.outline = "2px solid #43a047";
+        }
+
+        // The page's own SELL ITEMS, not the copy inside the (hidden) confirm box.
+        function sellButton() {
+            var all = document.querySelectorAll("button");
+            for (var i = 0; i < all.length; i++) {
+                var b = all[i];
+                if (b.offsetParent === null || b.closest(".sell-confirm")) {
+                    continue;
+                }
+                if (/^\\s*SELL ITEMS\\s*$/i.test(b.textContent || "")) {
+                    return b;
+                }
+            }
+            return null;
+        }
+
+        // After SELL ITEMS, Torn swaps in "Are you sure you would like to sell
+        // these items? Total value: $X  [SELL ITEMS] Cancel" and reuses a
+        // SELL ITEMS button for it, so the prompt is found by its wording.
+        function confirmButton() {
+            var all = document.querySelectorAll("button, a, input[type=button], input[type=submit]");
+            for (var i = 0; i < all.length; i++) {
+                var el = all[i];
+                if (el === btn || el.offsetParent === null) {
+                    continue;
+                }
+                var text = (el.textContent || el.value || "").trim();
+                if (!/^(yes|confirm|sell items)$/i.test(text)) {
+                    continue;
+                }
+                // Torn: button > span.btn > span.btn-wrap > div.sell-confirm
+                var box = el.closest(".sell-confirm") || el;
+                for (var up = 0; up < 4 && box && !/are you sure/i.test(box.textContent || ""); up++) {
+                    box = box.parentElement;
+                }
+                if (box && /are you sure/i.test(box.textContent || "")) {
+                    return el;
+                }
+            }
+            return null;
+        }
+
+        function nextShop() {
+            var idx = -1;
+            for (var i = 0; i < route.length; i++) {
+                if (route[i].step === step) {
+                    idx = i;
+                }
+            }
+            return route[idx + 1] || null;
+        }
+
+        function money(n) {
+            return "$" + Math.round(n).toLocaleString("en-US");
+        }
+
+        function render() {
+            if (Date.now() < busyUntil) {
+                btn.textContent = "Selling…";
+                return;
+            }
+            var rows = ourRows();
+            if (rows.length) {
+                var n = 0;
+                var total = 0;
+                rows.forEach(function (r) {
+                    n += r.qty;
+                    total += r.qty * r.price;
+                });
+                var what = n.toLocaleString("en-US") + " item(s) · " + money(total);
+                btn.textContent = confirmButton() ? "Confirm: sell " + what : "Sell " + what + " here";
+            } else {
+                var nxt = nextShop();
+                btn.textContent = nxt
+                    ? "Next: " + nxt.name + " (" + nxt.items.toLocaleString("en-US") + ") →"
+                    : "Shop run done ✓";
+            }
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            note = "";
+            var c = confirmButton();
+            if (c) {
+                busyUntil = Date.now() + 2500;
+                c.click();
+                render();
+                return;
+            }
+            var rows = ourRows();
+            if (rows.length) {
+                rows.forEach(setAmount);
+                var sell = sellButton();
+                if (!sell || sell.disabled) {
+                    note = "amounts filled, press SELL ITEMS yourself";
+                    render();
+                    return;
+                }
+                busyUntil = Date.now() + 1200;
+                sell.click();
+                render();
+                return;
+            }
+            var nxt = nextShop();
+            if (nxt) {
+                location.href = nxt.url;
+            }
+        });
+
+        // Tell the app what this shop's Sell page really lists, once per page
+        // load and before anything is sold: items shown = it buys them;
+        // items we routed here that aren't shown = it doesn't.
+        function reportShop() {
+            var ids = document.querySelectorAll("input[type=hidden][name=ID]");
+            if (!ids.length || typeof GM_xmlhttpRequest === "undefined") {
+                return false;
+            }
+            var buys = {};
+            for (var i = 0; i < ids.length; i++) {
+                buys[ids[i].value] = true;
+            }
+            var rejects = Object.keys(SHOP.items).filter(function (id) {
+                return SHOP.items[id].step === step && !buys[id];
+            });
+            var here = route.filter(function (r) { return r.step === step; })[0];
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: CFG.reportUrl,
+                headers: { "Content-Type": "application/json" },
+                data: JSON.stringify({
+                    step: step,
+                    name: here ? here.name : document.title.replace(/ [|] TORN$/, ""),
+                    buys: Object.keys(buys).map(Number),
+                    rejects: rejects.map(Number)
+                })
+            });
+            console.log("[TMA] reported " + step + ": buys " + Object.keys(buys).length + ", refused " + rejects.length);
+            return true;
+        }
+
+        var reported = false;
+        render();
+        setInterval(function () {
+            if (!reported) {
+                reported = reportShop();
+            }
+            render();
+        }, 700);
+        console.log("[TMA] shop run v" + VER + ": " + route.length + " shop(s) on route");
+    }
+
     if (window.top !== window) {
+        return;
+    }
+
+    if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
+        if (SHOP.route && SHOP.route.length) {
+            shopMode();
+        }
         return;
     }
 
@@ -343,6 +591,7 @@ DEFAULT_CFG: Dict[str, object] = {
     "dumpUndercutPct": 5.0,
     "topMinQuality": 50.0,
     "scanMs": 1500,
+    "reportUrl": "http://127.0.0.1:9999/shop-report",
 }
 
 
@@ -350,10 +599,12 @@ def build_userscript(
     price_map: Dict[int, Dict[str, object]],
     base_stats: Dict[int, Dict[str, object]],
     cfg: Optional[Dict[str, object]] = None,
+    shop_run: Optional[Dict[str, object]] = None,
 ) -> str:
     merged_cfg = {**DEFAULT_CFG, **(cfg or {})}
     return (
         TEMPLATE.replace("__PRICE_MAP__", json.dumps({str(k): v for k, v in price_map.items()}))
         .replace("__BASE_STATS__", json.dumps({str(k): v for k, v in base_stats.items()}))
         .replace("__CFG__", json.dumps(merged_cfg))
+        .replace("__SHOP__", json.dumps(shop_run or {"route": [], "items": {}}))
     )

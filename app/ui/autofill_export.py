@@ -13,7 +13,7 @@ from tma.autoupdate_server import DEFAULT_PORT, build_server
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
 from tma.userscript import build_userscript
 
-from ..paths import AUTOFILL_PATH
+from ..paths import AUTOFILL_PATH, SHOP_BUYS_PATH
 
 
 @st.cache_resource
@@ -25,7 +25,7 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
     """
     url = f"http://127.0.0.1:{port}/{AUTOFILL_PATH.name}"
     try:
-        server = build_server(AUTOFILL_PATH, port=port)
+        server = build_server(AUTOFILL_PATH, port=port, reports_path=SHOP_BUYS_PATH)
     except OSError:
         # Port already bound — most likely this same server from a prior process
         # (e.g. `tools/update_server.py` run by hand), so the URL is still live.
@@ -76,6 +76,7 @@ def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
         price_map,
         base_stats_map(profiles),
         cfg={"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality},
+        shop_run=plan_ctx.get("shop_run"),
     )
     write_ok = True
     try:

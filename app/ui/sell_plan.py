@@ -9,12 +9,17 @@ still above the floor (never sells) or far below it (gives money away).
 
 from __future__ import annotations
 
+from typing import Optional
+
 import pandas as pd
 import streamlit as st
 
 from tma.config import load_sell_prefs, save_sell_prefs
 from tma.inventory import inventory_category_for_profile
 from tma.sell_plan import LABEL_TO_PLAN, MARKET_FEE, PLAN_LABELS, PLANS, Decision, SellRules, decide, price_guards
+from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
+
+from ..paths import SHOP_BUYS_PATH
 
 _EDITOR_KEY = "sell_plan_editor"
 
@@ -35,6 +40,7 @@ def plan_rows(
     profiles: dict,
     rules: SellRules,
     overrides: dict[int, str],
+    known: Optional[dict] = None,
 ) -> list[dict]:
     """One row per pricing-table row (stackables combined, one per weapon/armor copy)."""
     out = []
@@ -48,7 +54,7 @@ def plan_rows(
             fast=_num(ro.get("Fast-sell price")),
             fair=_num(ro.get("Fair price")),
             greedy=_num(ro.get("Greedy price")),
-            shop_price=prof.get("sell_price"),
+            shop_price=shop_price_for(prof, iid, known),
             num_listings=_num(summ.get("num_clean_listings")),
             quality=real_q_by_idx.get(idx) if ro.get("is_stat") else None,
             rules=rules,
@@ -69,9 +75,10 @@ def plan_rows(
                 "Why": d.reason,
                 "Floor": _num(summ.get("floor_price")),
                 "Fair": kwargs["fair"],
-                "Shop pays": prof.get("sell_price") or None,
+                "Shop pays": shop_price_for(prof, iid, known),
                 "Est. proceeds": int(round(d.proceeds)),
                 "Stack value": float(kwargs["fair"] or kwargs["fast"] or 0.0) * qty,
+                "uid": ro.get("uid"),
             }
         )
     return out
@@ -83,6 +90,7 @@ def item_plans(
     profiles: dict,
     rules: SellRules,
     overrides: dict[int, str],
+    known: Optional[dict] = None,
 ) -> dict[int, dict]:
     """Per-item plan for the autofill script.
 
@@ -95,22 +103,22 @@ def item_plans(
     for _, r in df_summary.iterrows():
         iid = int(r["item_id"])
         prof = profiles.get(str(iid)) or {}
-        d = decide(
+        shop_price = shop_price_for(prof, iid, known)
+        kwargs = dict(
             qty=int(_num(r.get("my_quantity")) or 0),
             fast=_num(r.get("fast_sell_price")),
             fair=_num(r.get("fair_price")),
             greedy=_num(r.get("greedy_price")),
-            shop_price=prof.get("sell_price"),
             num_listings=_num(r.get("num_clean_listings")),
             quality=None,
             rules=rules,
-            override=overrides.get(iid),
             # Weapon/armor: the cheapest junk copy vs Torn's all-quality average
             # would hold every copy; the script applies refMin per copy instead.
             ref_price=None if iid in stat_ids else prof.get("market_price"),
             sellable=is_sellable(prof, rules),
         )
-        shop_min, ref_min = price_guards(prof.get("sell_price"), prof.get("market_price"))
+        d = decide(**kwargs, shop_price=shop_price, override=overrides.get(iid))
+        shop_min, ref_min = price_guards(shop_price, prof.get("market_price"))
         plans[iid] = {
             "plan": d.plan,
             "auto": d.auto,
@@ -119,9 +127,14 @@ def item_plans(
             # A plan you picked yourself is listed anyway (the app shows the warning).
             "refMin": ref_min if d.auto else None,
         }
+        if d.plan == "shop":
+            # Still in inventory on the Add Listing page means no shop took it
+            # (do the shop run first): list it with its market plan instead.
+            fb = decide(**kwargs, shop_price=None, override=None if overrides.get(iid) == "shop" else overrides.get(iid))
+            plans[iid]["fallback"] = {"plan": fb.plan, "list": fb.price, "refMin": ref_min if fb.auto else None}
     for _, row in edited.iterrows():
         iid = int(row["item_id"])
-        if iid in plans and not row["is_stat"]:
+        if iid in plans and not row["is_stat"] and plans[iid]["plan"] != "shop":
             price = _num(row.get("List price"))
             plans[iid]["list"] = int(price) if price else None
             plans[iid]["qty"] = int(row["Qty"])
@@ -184,7 +197,8 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
 
     summary_by_id = {int(r["item_id"]): r for r in an["df_summary"].to_dict("records")}
     profiles = an.get("profiles") or {}
-    rows = plan_rows(ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides)
+    known = load_shop_knowledge(SHOP_BUYS_PATH)
+    rows = plan_rows(ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known)
     # data_editor stores edits by row position, so the order must not depend
     # on the plan (which edits change) — stack value doesn't.
     df = pd.DataFrame(rows)
@@ -221,12 +235,22 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
             st.rerun()
 
     _render_totals(edited)
-    _render_shop_and_keep(edited, profiles)
+    shop_run = build_shop_run(shop_rows(edited), profiles, known)
+    _render_shop_run(shop_run)
 
     return {
-        "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides),
+        "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known),
         "rules": rules,
+        "shop_run": shop_run,
     }
+
+
+def shop_rows(edited: pd.DataFrame) -> list[dict]:
+    shop = edited[edited["Plan"] == PLAN_LABELS["shop"]]
+    return [
+        {"item_id": r["item_id"], "qty": r["Qty"], "uid": _num(r.get("uid")), "is_stat": r["is_stat"], "price": _num(r["List price"])}
+        for _, r in shop.iterrows()
+    ]
 
 
 def _row_proceeds(row) -> float:
@@ -248,20 +272,23 @@ def _render_totals(edited: pd.DataFrame) -> None:
         col.metric(f"{label} ({n})", f"${total:,.0f}" if plan != "keep" else "—")
 
 
-def _render_shop_and_keep(edited: pd.DataFrame, profiles: dict) -> None:
-    shop = edited[edited["Plan"] == PLAN_LABELS["shop"]]
-    if not shop.empty:
-        st.markdown("**Sell to a city shop** (no listing needed)")
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "Item": shop["Item"],
-                    "Qty": shop["Qty"],
-                    "Shop pays": shop["Shop pays"],
-                    "Sold in": [(profiles.get(str(i)) or {}).get("vendor") or "—" for i in shop["item_id"]],
-                }
-            ),
-            width="stretch",
-            hide_index=True,
-        )
-    st.caption("The Autofill script lists Dump / Competitive / Top dollar items and leaves Shop and Keep rows blank.")
+def _render_shop_run(shop_run: dict) -> None:
+    route = shop_run["route"]
+    if not route:
+        st.caption("Nothing to sell to a city shop.")
+        return
+    total = sum(s["payout"] for s in route)
+    n = sum(s["items"] for s in route)
+    st.markdown(f"**Shop run**: {n:,} items · ${total:,.0f} across {len(route)} shop(s)")
+    st.dataframe(
+        pd.DataFrame([{"Shop": s["name"], "Items": s["items"], "Payout": s["payout"]} for s in route]),
+        width="stretch",
+        hide_index=True,
+        column_config={"Payout": st.column_config.NumberColumn(format="%,.0f")},
+    )
+    st.markdown(f"[**Start shop run →**]({route[0]['url']})")
+    st.caption(
+        "Needs the autofill script from this run (Autofill script tab). On each shop page one button sits in the "
+        "same spot: click it to sell this shop's items, then again for the next shop. Only Shop-plan items are "
+        "filled; weapon/armor copies are matched one by one, so a high-roll copy is never sold to a shop."
+    )

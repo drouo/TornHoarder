@@ -7,6 +7,7 @@ import streamlit as st
 from .autofill_export import render_autofill_export
 from .diagnostics import render_diagnostics
 from .pricing_table import render_pricing_table, render_warnings_banner
+from .search import SEARCH_KEY
 from .sell_plan import render_sell_plan
 from .special_finds import render_special_finds
 
@@ -17,6 +18,13 @@ def render_results(an: dict) -> None:
 
     st.subheader("Price overview")
     render_warnings_banner(warnings)
+    st.text_input(
+        "Search items",
+        key=SEARCH_KEY,
+        placeholder="e.g. plushie or Yasukuni",
+        help="Narrows the Sell plan and Pricing tables to matching items. The plan, shop run and listings still "
+        "cover every item.",
+    )
 
     tab_plan, tab_pricing, tab_special, tab_autofill, tab_diag = st.tabs(
         ["Sell plan", "Pricing table", "Special finds", "Autofill script", "Diagnostics"]

@@ -283,6 +283,17 @@ class SellPlanTabAppTest(unittest.TestCase):
         metrics = {m.label: m.value for m in at.metric}
         self.assertEqual(metrics["Keep (1)"], "—")
 
+    def test_search_narrows_the_tables_but_not_the_plan(self):
+        at = AppTest.from_file(str(HARNESS))
+        at.run(timeout=30)
+        [search] = [t for t in at.text_input if t.key == "item_search"]
+        search.set_value("kevlar").run(timeout=30)
+        self.assertEqual(list(at.exception), [], msg=[str(e) for e in at.exception])
+        self.assertTrue(any("Showing 1 of 2 rows" in c.value for c in at.caption))
+        # Totals still cover the AK-47 the search hides.
+        metrics = {m.label: m.value for m in at.metric}
+        self.assertEqual((metrics["Shop (1)"], "Dump (1)" in metrics), ("$3k", True))
+
 
 if __name__ == "__main__":
     unittest.main()

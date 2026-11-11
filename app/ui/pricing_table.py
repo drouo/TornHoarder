@@ -10,6 +10,7 @@ import streamlit as st
 from tma.market_enrichment import price_at_quality, quality_from_stats
 
 from .format import fmt_int
+from .search import searchable_editor
 
 ADD_LISTING_URL = "https://www.torn.com/page.php?sid=ItemMarket#/addListing"
 
@@ -220,16 +221,18 @@ def render_pricing_table(an: dict) -> dict:
         "item_id": st.column_config.NumberColumn(disabled=True),
     }
 
-    try:
-        styled = base.style.map(tier_style, subset=["Tier"])
-    except AttributeError:
-        styled = base.style.applymap(tier_style, subset=["Tier"])
+    def styled(df: pd.DataFrame):
+        try:
+            return df.style.map(tier_style, subset=["Tier"])
+        except AttributeError:
+            return df.style.applymap(tier_style, subset=["Tier"])
 
-    edited = st.data_editor(
-        styled,
+    edited = searchable_editor(
+        base,
+        _LIST_EDITOR_KEY,
+        style=styled,
         width="stretch",
         hide_index=True,
-        key=_LIST_EDITOR_KEY,
         column_config=column_config,
     )
 

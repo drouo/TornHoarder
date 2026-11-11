@@ -36,6 +36,7 @@ from tma.sell_plan import (
 from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
 
 from ..paths import OC_ITEMS_PATH, SHOP_BUYS_PATH
+from .search import searchable_editor
 
 _EDITOR_KEY = "sell_plan_editor"
 
@@ -350,11 +351,11 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
         "**Keeping** (both remembered next run, for every copy of that item). Only **Selling** is ever listed or "
         "sold. **List price** is editable for plain items; weapon/armor copies are re-priced from their rolls."
     )
-    edited = st.data_editor(
+    edited = searchable_editor(
         df,
+        _EDITOR_KEY,
         width="stretch",
         hide_index=True,
-        key=_EDITOR_KEY,
         column_order=(
             "Plan", "Item", "Qty", "Keeping", "Selling", "List price", "Est. proceeds", "Why", "Floor", "Fair", "Shop pays"
         ),

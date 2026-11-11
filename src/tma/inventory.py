@@ -144,7 +144,10 @@ def fetch_item_stats_many(
     return stats_by_uid, errors[:5]
 
 
-def _load_stats_cache(path: Path) -> dict:
+CACHE_META_KEYS = ("item_id", "first_seen")
+
+
+def load_stats_cache(path: Path) -> dict:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -160,6 +163,8 @@ def fetch_item_stats_cached(
     bucket_take: Optional[Callable[[int], None]] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
     prune: bool = False,
+    item_ids: Optional[dict] = None,
+    now: Optional[float] = None,
 ) -> tuple[dict, list[str], int]:
     """Like fetch_item_stats_many, but each copy is read from Torn only once.
 
@@ -167,9 +172,12 @@ def fetch_item_stats_cached(
     kept in `cache_path` and reused; only new copies (or ones whose read failed
     before) cost an API call. `prune` drops copies not in `uids`, for a full
     inventory pull where anything missing has been sold or traded away.
-    Returns (stats_by_uid, errors, n_from_cache).
+    Each cached copy also records `first_seen` (unix time it was first read)
+    and its `item_id` (from `item_ids`, uid -> id); these are stripped from
+    the returned stats. Returns (stats_by_uid, errors, n_from_cache).
     """
-    cache = _load_stats_cache(cache_path)
+    now = time.time() if now is None else now
+    cache = load_stats_cache(cache_path)
     wanted = [str(u) for u in uids]
     # A successful read always has the stat keys (values may be None for a copy
     # with no rolls); a failed one is {} and gets retried next time.
@@ -181,11 +189,17 @@ def fetch_item_stats_cached(
     )
     for uid, stats in fetched.items():
         if stats:
-            cache[uid] = stats
+            cache[uid] = dict(stats, first_seen=now)
+    for uid, iid in (item_ids or {}).items():
+        if cache.get(str(uid)):
+            cache[str(uid)]["item_id"] = int(iid)
     if prune:
         cache = {u: cache[u] for u in wanted if u in cache}
     Path(cache_path).write_text(json.dumps(cache), encoding="utf-8")
-    result = {u: cache.get(u) or fetched.get(u) or {} for u in wanted}
+    result = {
+        u: {k: v for k, v in (cache.get(u) or fetched.get(u) or {}).items() if k not in CACHE_META_KEYS}
+        for u in wanted
+    }
     return result, errors, len(wanted) - len(missing)
 
 

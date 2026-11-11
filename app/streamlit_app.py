@@ -336,7 +336,7 @@ if submitted:
 
                     uid_stats, uid_errors, n_cached = fetch_item_stats_cached(
                         sess, api_key, stats_targets, UID_STATS_PATH,
-                        bucket_take=bucket.take, on_progress=stat_report, prune=True,
+                        bucket_take=bucket.take, on_progress=stat_report, prune=True, item_ids=uid_item,
                     )
                     for err in uid_errors:
                         st.caption(f"copy stats: {err}")
@@ -415,7 +415,9 @@ if submitted:
                 df_parsed = pd.DataFrame([{"name": single_name, "id": iid, "quantity": 1}])
                 agg = [(iid, 1)]
                 items = [(iid, 1, single_name)]
-                stats = fetch_item_stats_cached(sess, api_key, [single_uid], UID_STATS_PATH, bucket_take=bucket.take)[0]
+                stats = fetch_item_stats_cached(
+                    sess, api_key, [single_uid], UID_STATS_PATH, bucket_take=bucket.take, item_ids={single_uid: iid}
+                )[0]
                 if stats.get(str(single_uid)):
                     uid_stats[single_uid] = stats[str(single_uid)]
                 else:

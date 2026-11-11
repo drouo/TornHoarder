@@ -232,7 +232,7 @@ TEMPLATE = """\
         btn.id = "th-list-btn";
         btn.type = "button";
         btn.style.cssText =
-            "position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:999999;" +
+            "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
             "min-width:360px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
             "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
             "box-shadow:0 4px 14px rgba(0,0,0,.5);display:none;";
@@ -241,7 +241,7 @@ TEMPLATE = """\
         var panel = document.createElement("div");
         panel.id = "th-list-review";
         panel.style.cssText =
-            "position:fixed;left:50%;bottom:136px;transform:translateX(-50%);z-index:999999;" +
+            "position:fixed;left:50%;top:160px;transform:translateX(-50%);z-index:999999;" +
             "min-width:360px;max-width:560px;max-height:42vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
             "background:rgba(0,0,0,.92);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;display:none;";
         document.body.appendChild(panel);
@@ -726,20 +726,20 @@ TEMPLATE = """\
         btn.id = "tma-shop-btn";
         btn.type = "button";
         btn.style.cssText =
-            "position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:999999;" +
+            "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
             "min-width:340px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
             "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
             "box-shadow:0 4px 14px rgba(0,0,0,.5);";
         document.body.appendChild(btn);
 
-        // Review list above the button: what click 1 will fill, line by line.
+        // Review list under the button: what click 1 will fill, line by line.
         // Clicking a line leaves that item out of this shop's sale (and back in).
         var excluded = {};
         var panelSig = "";
         var panel = document.createElement("div");
         panel.id = "tma-shop-review";
         panel.style.cssText =
-            "position:fixed;left:50%;bottom:136px;transform:translateX(-50%);z-index:999999;" +
+            "position:fixed;left:50%;top:160px;transform:translateX(-50%);z-index:999999;" +
             "min-width:340px;max-height:40vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
             "background:rgba(0,0,0,.9);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;";
         document.body.appendChild(panel);

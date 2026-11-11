@@ -101,7 +101,7 @@ Only the surplus is ever sold. The **Keeping** column shows how many of each ite
 
 Shop-plan items are sold to city shops with one button. **Start shop run →** on the Sell plan tab opens the first shop, and the userscript puts one green button in the same spot on every shop page:
 
-1. **Review:** the panel above the button lists each item × quantity × price and the total. Click a line to leave it out.
+1. **Review:** the panel under the button lists each item × quantity × price and the total. Click a line to leave it out.
 2. **Sell N item(s) here · $X:** fills only this run's Shop items (weapon/armor copies are matched by their armoryID; on Big Al's it ticks each copy) and opens Torn's *Are you sure?* with the total.
 3. **Confirm: sell …:** confirms that one sale.
 4. **Next: <shop> →:** goes to the next shop, until **Shop run done ✓**.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Dict, Optional
 
 from . import __version__
@@ -765,6 +766,30 @@ TEMPLATE = """\
         var route = SHOP.route || [];
         var busyUntil = 0;
         var note = "";
+        var ADD_LISTING_URL = "https://www.torn.com/page.php?sid=ItemMarket#/addListing";
+        var shopName = (route.filter(function (r) { return r.step === step; })[0] || {}).name || step;
+
+        // What this run sold, kept in the browser across shop pages. A sale is
+        // recorded when Confirm is clicked here; one run = one built script.
+        var RUN_KEY = "tornhoarder.shopRun";
+        function loadRun() {
+            try {
+                var r = JSON.parse(localStorage.getItem(RUN_KEY) || "null");
+                if (r && r.built === SHOP.built) {
+                    return r;
+                }
+            } catch (e) { /* storage blocked or corrupt: start fresh */ }
+            return { built: SHOP.built, sold: [] };
+        }
+        function saveRun(r) {
+            try {
+                localStorage.setItem(RUN_KEY, JSON.stringify(r));
+            } catch (e) { /* storage blocked: the summary just won't persist */ }
+        }
+        function soldTotal(run) {
+            return run.sold.reduce(function (sum, x) { return sum + x.qty * x.price; }, 0);
+        }
+        var pending = null;
 
         var btn = document.createElement("button");
         btn.id = "tma-shop-btn";
@@ -831,6 +856,54 @@ TEMPLATE = """\
                 panel.appendChild(line);
             });
             panel.scrollTop = keepTop;
+        }
+
+        function renderSummary(run) {
+            var sig = "summary:" + run.sold.length;
+            panel.style.display = "block";
+            if (sig === panelSig) {
+                return;
+            }
+            panelSig = sig;
+            panel.textContent = "";
+            var head = document.createElement("div");
+            head.style.cssText = "color:#9ccc65;margin-bottom:4px;";
+            panel.appendChild(head);
+            if (!run.sold.length) {
+                head.textContent = "Shop run finished. No sales were confirmed with this button, so there is nothing to total.";
+                return;
+            }
+            var byShop = {};
+            var shops = [];
+            run.sold.forEach(function (x) {
+                if (!byShop[x.shop]) {
+                    byShop[x.shop] = { qty: 0, value: 0, items: {} };
+                    shops.push(x.shop);
+                }
+                var g = byShop[x.shop];
+                g.qty += x.qty;
+                g.value += x.qty * x.price;
+                g.items[x.name] = (g.items[x.name] || 0) + x.qty;
+            });
+            var units = run.sold.reduce(function (n, x) { return n + x.qty; }, 0);
+            head.textContent = "Shop run sold " + units.toLocaleString("en-US") + " item(s) for " + money(soldTotal(run)) + ":";
+            shops.forEach(function (name) {
+                var g = byShop[name];
+                var line = document.createElement("div");
+                line.style.cssText = "margin-top:4px;";
+                line.textContent = name + ": " + g.qty.toLocaleString("en-US") + " item(s) · " + money(g.value);
+                panel.appendChild(line);
+                Object.keys(g.items).forEach(function (item) {
+                    var sub = document.createElement("div");
+                    sub.style.cssText = "color:#bbb;padding-left:12px;";
+                    sub.textContent = g.items[item].toLocaleString("en-US") + " × " + item;
+                    panel.appendChild(sub);
+                });
+            });
+            var tip = document.createElement("div");
+            tip.style.cssText = "color:#bbb;margin-top:6px;";
+            tip.textContent = "Next: list everything else on the Item Market (the button above). Run the app again first if you want its plan to drop what you just sold.";
+            panel.appendChild(tip);
         }
 
         function ourRows(includeExcluded) {
@@ -956,9 +1029,15 @@ TEMPLATE = """\
                 btn.textContent = confirming ? "Confirm: sell " + what : "Sell " + what + " here";
             } else {
                 var nxt = nextShop();
-                btn.textContent = nxt
-                    ? "Next: " + nxt.name + " (" + nxt.items.toLocaleString("en-US") + ") →"
-                    : "Shop run done ✓";
+                var run = loadRun();
+                var sold = soldTotal(run);
+                if (nxt) {
+                    btn.textContent = "Next: " + nxt.name + " (" + nxt.items.toLocaleString("en-US") + ") →" +
+                        (sold ? " · " + money(sold) + " sold so far" : "");
+                } else {
+                    btn.textContent = "Shop run done ✓ " + (sold ? money(sold) + " sold · " : "") + "Next: list the rest →";
+                    renderSummary(run);
+                }
             }
             if (note) {
                 btn.textContent += " — " + note;
@@ -973,6 +1052,12 @@ TEMPLATE = """\
             var c = confirmButton();
             if (c) {
                 busyUntil = Date.now() + 2500;
+                if (pending) {
+                    var run = loadRun();
+                    run.sold = run.sold.concat(pending);
+                    saveRun(run);
+                    pending = null;
+                }
                 c.click();
                 render();
                 return;
@@ -980,6 +1065,7 @@ TEMPLATE = """\
             var rows = ourRows();
             if (rows.length) {
                 rows.forEach(setAmount);
+                pending = rows.map(function (r) { return { shop: shopName, name: r.name, qty: r.qty, price: r.price }; });
                 var sell = sellButton();
                 if (!sell || sell.disabled) {
                     note = "amounts filled, press SELL ITEMS yourself";
@@ -992,9 +1078,7 @@ TEMPLATE = """\
                 return;
             }
             var nxt = nextShop();
-            if (nxt) {
-                location.href = nxt.url;
-            }
+            location.href = nxt ? nxt.url : ADD_LISTING_URL;
         });
 
         // Tell the app what this shop's Sell page really lists, once per page
@@ -1079,6 +1163,7 @@ def build_userscript(
         TEMPLATE.replace("__PRICE_MAP__", json.dumps({str(k): v for k, v in price_map.items()}))
         .replace("__BASE_STATS__", json.dumps({str(k): v for k, v in base_stats.items()}))
         .replace("__CFG__", json.dumps(merged_cfg))
-        .replace("__SHOP__", json.dumps(shop_run or {"route": [], "items": {}}))
+        # "built" tells one run's sales record apart from the next one's.
+        .replace("__SHOP__", json.dumps(dict(shop_run or {"route": [], "items": {}}, built=int(time.time()))))
         .replace("__VERSION__", __version__)
     )

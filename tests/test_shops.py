@@ -134,11 +134,16 @@ class UserscriptShopTest(unittest.TestCase):
         self.assertIn("// @grant        GM_xmlhttpRequest", out)
         self.assertIn('"reportUrl": "http://127.0.0.1:9999/shop-report"', out)
         start = out.index("var SHOP = ") + len("var SHOP = ")
-        self.assertEqual(json.loads(out[start:out.index(";", start)]), run)
+        embedded = json.loads(out[start:out.index(";", start)])
+        # "built" stamps the run, so the shop pages can tell this run's sales from the last one's.
+        self.assertIsInstance(embedded.pop("built"), int)
+        self.assertEqual(embedded, run)
 
     def test_no_shop_run_embeds_an_empty_one(self):
         out = build_userscript({}, {})
-        self.assertIn('var SHOP = {"route": [], "items": {}};', out)
+        start = out.index("var SHOP = ") + len("var SHOP = ")
+        embedded = json.loads(out[start:out.index(";", start)])
+        self.assertEqual((embedded["route"], embedded["items"]), ([], {}))
 
 
 if __name__ == "__main__":

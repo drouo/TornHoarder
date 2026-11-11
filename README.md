@@ -95,6 +95,7 @@ Only the surplus is ever sold. The **Keeping** column shows how many of each ite
 - **Crime items are all kept.** That covers everything an Organized Crime requires (from Torn's `torn/organizedcrimes`) and everything whose in-game description says a crime uses it (Forgery, Disposal, Graffiti, Arson…). Untick **Keep all crime items** under Rules to keep only a stock and sell the rest: 1 of each reusable OC tool, 3 of each item an OC uses up, and 1 of every other crime item.
 - **Clothing and Collectibles:** 1 of each is kept, so only duplicates are sold. Change the categories under Rules.
 - **Weapons and armor:** the copies kept are your best by quality. Equipped gear is never touched.
+- **Museum set pieces:** when a complete set is worth more exchanged for points than sold (see [Museum sets](#museum-sets)), one of each piece per complete set is kept. Extras still sell.
 - **Everything else:** 0 kept.
 
 ## Shop run
@@ -122,22 +123,48 @@ Each shop page also reports what that shop really buys back to the app (`POST 12
 
 A full plan of about 650 rows across 13 tabs fills in roughly 3½ minutes. **Start over** clears all of Torn's selections.
 
+## Your listings
+
+Each Run also reads your active listings (`user/itemmarket`) and checks them against the current market. That includes items you no longer hold, which cost one extra market call each. The **Your listings** section on the Sell plan tab shows each one's price, the cheapest other listing, how many listings are cheaper, and a status:
+
+| Status | New price |
+|---|---|
+| **undercut by $X** | $1 under the cheapest other listing |
+| **tied for cheapest** | $1 under |
+| **cheapest by N%** (more than 10% under the next listing) | what you could ask: $1 under the next listing |
+| **cheapest**, **only listing** | none |
+
+Your own listing is left out of the comparison. Weapon/armor copies only compete with copies of the same quality or better. A new price is never suggested below what a shop pays (after the tax) or half Torn's reference price. **Open your listings →** goes to Torn's page, where you change prices and click **SAVE CHANGES**. A one-button fill for that page is planned.
+
+## Museum sets
+
+Each Run reads the museum sets (`torn/museum`, refreshed daily) and the cheapest point price (`market/pointsmarket`). For every set you own a piece of, the **Museum sets** section on the Sell plan tab compares:
+
+- **Exchanged:** the set's points × the point price;
+- **Sold:** every piece at its fast-sell price after the 5% tax (Torn's reference price for pieces you don't own).
+
+When exchanging wins, the pieces of your complete sets are held out of the sell plan, ready to trade in at the museum. **Next set needs** lists what one more set is missing and its cost at reference prices.
+
+## Price history
+
+Every Run adds one row per priced item to `data/price_history.csv`: time, item, category, floor/fast/fair/greedy prices, number of listings, units listed, your quantity and Torn's reference price. Items you own and items you have listed are always recorded. **Track price history for** (next to Sell categories) adds every item in the chosen categories, owned or not, at one extra market call each. View the rows under **Diagnostics → Price history**, or open the CSV in a spreadsheet.
+
 ## App tabs
 
 | Tab | Contents |
 |---|---|
-| **Sell plan** | Per-item plan, Keeping/Selling, list price, estimated proceeds, Rules, and the shop run and Add Listing links. |
+| **Sell plan** | Per-item plan, Keeping/Selling, list price, estimated proceeds, Rules, the shop run and Add Listing links, your listings and museum sets. |
 | **Pricing table** | Fast/fair/greedy prices, copy-level prices from your stats, and a plain-text listing builder. |
 | **Special finds** | Weapon/armor copies priced well above the item's standard curve. |
 | **Autofill script** | Install link and download for the Tampermonkey userscript. |
-| **Diagnostics** | Parsed and unmatched items, raw market data and summary tables. |
+| **Diagnostics** | Parsed and unmatched items, raw market data, summary tables, the copy stats cache (with when each copy was first seen) and price history. |
 
 ## Torn API key & privacy
 
 | | |
 |---|---|
-| **Key access level** | **Limited**: inventory pulls need `user → inventory`. Market and item lookups work with any key. |
-| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `market/{id}/itemmarket`, `torn/items`, `torn/organizedcrimes`. All read-only. |
+| **Key access level** | **Limited**: inventory pulls need `user → inventory`, and your listings need a Limited key. Market and item lookups work with any key. |
+| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `user/itemmarket`, `market/{id}/itemmarket`, `market/pointsmarket`, `torn/items`, `torn/organizedcrimes`, `torn/museum`. All read-only. |
 | **Key storage** | Only on your PC, in `~/.tma_config.json`, and only if **Remember API key** is ticked. |
 | **Data sharing** | None. Requests go straight from your PC to `api.torn.com`. The userscript talks only to Torn and to this app on `127.0.0.1` (your own machine). |
 | **Purpose** | Pricing and selling your own items. |
@@ -169,6 +196,9 @@ TornHoarder/
 │     ├─ sell_plan.py        # plan classifier, reserves, price guards (pure logic)
 │     ├─ shops.py            # city-shop routing + learned shop buy lists
 │     ├─ crime_items.py      # OC requirements + crime-item detection
+│     ├─ museum.py           # museum sets: exchange vs sell
+│     ├─ my_listings.py      # your active listings vs the market
+│     ├─ price_history.py    # one CSV row per item per run
 │     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
 │     ├─ item_stats.py       # stat-value model / quality-curve fitting
 │     ├─ quality.py
@@ -178,8 +208,8 @@ TornHoarder/
 │     └─ __init__.py         # __version__
 ├─ data/
 │  ├─ torn_item_dictionary.csv
-│  └─ torn_item_profiles.json  # (generated, git-ignored: tornhoarder.user.js,
-│                              #  shop_buys.json, oc_items.json, uid_stats.json)
+│  └─ torn_item_profiles.json  # (generated, git-ignored: tornhoarder.user.js, shop_buys.json,
+│                              #  oc_items.json, uid_stats.json, museum_sets.json, price_history.csv)
 ├─ tools/
 │  ├─ server.ps1             # start/stop the app on Windows
 │  ├─ update_server.py       # serve the script without the app running

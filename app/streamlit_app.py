@@ -1,3 +1,4 @@
+import re
 import sys
 import time
 from dataclasses import replace
@@ -15,7 +16,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from app.paths import (
-    DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, SHOP_BUYS_PATH, UID_STATS_PATH,
+    AUTOFILL_PATH, DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
+    UID_STATS_PATH,
 )
 from app.ui import autofill_export
 from app.ui.results import render_results
@@ -45,6 +47,16 @@ from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
 MAX_WORKERS = 5
 RATE_LIMIT_PER_MIN = 90
 MARKET_PHASE_TIMEOUT_S = 1200.0
+
+
+def script_version(path) -> Optional[str]:
+    """The @version of the last-built userscript, or None if there isn't one."""
+    try:
+        head = Path(path).read_text(encoding="utf-8")[:2000]
+    except OSError:
+        return None
+    m = re.search(r"@version\s+(\S+)", head)
+    return m.group(1) if m else None
 
 
 def _numeric_market(df_market: pd.DataFrame) -> pd.DataFrame:
@@ -172,6 +184,13 @@ it's remembered next run; the autofill script lists items by their plan.
 - **Greedy price:** clean Q3 (upper quartile) of prices.
 - **Fast-sell price:** $1 under the cheapest clean listing — buyers take the cheapest listing first.
         """
+    )
+
+served = script_version(AUTOFILL_PATH)
+if served and served != __version__:
+    st.warning(
+        f"Your Tampermonkey script is v{served}; this app is v{__version__}. Click **Run** to build the new "
+        "script, then use Tampermonkey's *Check for userscript updates*."
     )
 
 st.subheader("Item Market listings")

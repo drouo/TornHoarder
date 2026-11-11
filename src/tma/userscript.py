@@ -45,6 +45,20 @@ TEMPLATE = """\
         return "$" + Math.round(n).toLocaleString("en-US");
     }
 
+    // Several installed copies each draw their own button in the same spot, so
+    // the one on top may be stale. Warn from inside the panel.
+    function copiesWarning(panelEl, buttonId) {
+        var n = document.querySelectorAll("#" + buttonId).length;
+        if (n < 2) {
+            return;
+        }
+        var div = document.createElement("div");
+        div.textContent = n + " copies of TornHoarder are running on this page, and the button on top may be an old one. " +
+            "In the Tampermonkey dashboard keep only one TornHoarder script (v" + VER + ") and delete the rest.";
+        div.style.cssText = "color:#ff8a80;font-weight:bold;margin-bottom:6px;";
+        panelEl.appendChild(div);
+    }
+
     // "Select all · Deselect all" for a review panel: sets every id in or out.
     function selectLinks(panelEl, excludedObj, ids, onDone) {
         var div = document.createElement("div");
@@ -572,7 +586,7 @@ TEMPLATE = """\
             var sig;
             if (phase === "plan") {
                 var lines = plannedLines();
-                sig = "plan:" + ((tornTotals() || {}).items || 0) + ":" + lines.map(function (l) { return l.id + (excluded[l.id] ? "x" : ""); }).join(",");
+                sig = "plan:" + document.querySelectorAll("#th-list-btn").length + ":" + ((tornTotals() || {}).items || 0) + ":" + lines.map(function (l) { return l.id + (excluded[l.id] ? "x" : ""); }).join(",");
                 if (sig === panelSig) {
                     return;
                 }
@@ -588,6 +602,7 @@ TEMPLATE = """\
                         picked += 1;
                     }
                 });
+                copiesWarning(panel, "th-list-btn");
                 var already = tornTotals();
                 if (already && already.items > 0) {
                     line("Torn already has " + already.items.toLocaleString("en-US") + " item(s) selected from before. " +
@@ -788,7 +803,8 @@ TEMPLATE = """\
                 }
                 byId[r.id].qty += r.qty;
             });
-            var sig = order.map(function (id) { return id + ":" + byId[id].qty + ":" + !!excluded[id]; }).join("|");
+            var sig = document.querySelectorAll("#tma-shop-btn").length + "#" +
+                order.map(function (id) { return id + ":" + byId[id].qty + ":" + !!excluded[id]; }).join("|");
             panel.style.display = "block";
             if (sig === panelSig) {
                 return;
@@ -800,6 +816,7 @@ TEMPLATE = """\
             head.textContent = "Will sell here (click a line to leave it out):";
             head.style.cssText = "color:#9ccc65;margin-bottom:4px;";
             panel.appendChild(head);
+            copiesWarning(panel, "tma-shop-btn");
             selectLinks(panel, excluded, order, render);
             order.forEach(function (id) {
                 var g = byId[id];

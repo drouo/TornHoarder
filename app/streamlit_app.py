@@ -14,12 +14,14 @@ if str(ROOT_DIR) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.paths import DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, UID_STATS_PATH
+from app.paths import (
+    DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, SHOP_BUYS_PATH, UID_STATS_PATH,
+)
 from app.ui import autofill_export
 from app.ui.results import render_results
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
-from tma import museum
+from tma import museum, my_listings
 from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
@@ -35,6 +37,7 @@ from tma.inventory import (
 )
 from tma.inventory_matcher import load_dictionary, match_inventory
 from tma.price_history import append_history, history_rows, tracked_item_ids
+from tma.shops import load_shop_knowledge, shop_price_for
 from tma.market_enrichment import wide_to_long, enrich_all_items, build_summary_from_enriched
 from tma.market_fetch import fetch_all_item_markets
 from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
@@ -495,9 +498,20 @@ if submitted:
     per_id_qty: dict[int, int] = {}
     for iid, qty in agg:
         per_id_qty[iid] = per_id_qty.get(iid, 0) + qty
+    # Your active listings are checked against the market too; their items
+    # aren't in your inventory any more, so they're fetched as extras.
+    listed: list[dict] = []
+    if source == "API inventory":
+        listed, listed_err = my_listings.fetch_my_listings(sess, api_key, bucket)
+        if listed_err:
+            st.caption(f"Couldn't read your Item Market listings ({listed_err}).")
+    listed_ids = {int((l.get("item") or {}).get("id")) for l in listed if (l.get("item") or {}).get("id")}
     # Tracked items you don't own ride along in the same market fetch, for
     # price history only; they never reach the sell plan.
-    extra_ids = tracked_item_ids(load_profiles(PROFILES_PATH), history_categories, exclude=per_id_qty)
+    extra_ids = sorted(
+        set(tracked_item_ids(load_profiles(PROFILES_PATH), history_categories, exclude=per_id_qty))
+        | (listed_ids - set(per_id_qty))
+    )
     unique_ids = list(per_id_qty) + extra_ids
     n_uniq = len(unique_ids)
 
@@ -595,6 +609,7 @@ if submitted:
         n_hist = append_history(PRICE_HISTORY_PATH, history_rows(df_hist, df_long_hist, profiles, time.time()))
         st.caption(f"Price history: {n_hist} rows added ({len(extra_rows)} tracked items you don't own).")
 
+        known_shops = load_shop_knowledge(SHOP_BUYS_PATH)
         st.session_state["analysis"] = {
             "df_summary": df_summary,
             "warnings": warnings,
@@ -606,6 +621,16 @@ if submitted:
             "entries": entries,
             "uid_stats": uid_stats if source in ("API inventory", "Single item") else {},
             "museum": {"sets": museum.load_museum(MUSEUM_PATH), "point_price": point_price},
+            "my_listings": [
+                my_listings.review_listing(
+                    l,
+                    my_listings.market_listings(per_id_rows.get(int(l["item"]["id"])) or {}),
+                    shop_price_for(profiles.get(str(l["item"]["id"])), int(l["item"]["id"]), known_shops),
+                    (profiles.get(str(l["item"]["id"])) or {}).get("market_price"),
+                )
+                for l in listed
+                if (l.get("item") or {}).get("id")
+            ],
         }
         st.session_state["has_data"] = True
 

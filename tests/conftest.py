@@ -48,6 +48,10 @@ def no_catalog_refresh(monkeypatch):
     monkeypatch.setattr(museum, "refresh_museum_if_stale", lambda *a, **k: (False, None))
     monkeypatch.setattr(museum, "fetch_point_price", lambda *a, **k: (None, "not fetched in tests"))
 
+    from tma import my_listings
+
+    monkeypatch.setattr(my_listings, "fetch_my_listings", lambda *a, **k: ([], None))
+
 
 @pytest.fixture(autouse=True)
 def isolate_autofill_output(tmp_path, monkeypatch):

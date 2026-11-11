@@ -386,6 +386,7 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     _render_shop_run(shop_run)
     _render_market_run(edited)
     _render_museum(museum_sets, (an.get("museum") or {}).get("point_price"))
+    _render_my_listings(an.get("my_listings") or [])
 
     return {
         "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known),
@@ -523,4 +524,29 @@ def _render_museum(sets: list[dict], point_price) -> None:
         f"fast-sell price after the {MARKET_FEE:.0%} tax (Torn's reference price for pieces you don't own). When "
         "exchanging is better, one of each piece per complete set is kept out of the plan automatically; trade "
         "them in at the museum. **Next set needs** is what one more set is missing, at reference prices."
+    )
+
+
+VIEW_LISTINGS_URL = "https://www.torn.com/page.php?sid=ItemMarket#/viewListing"
+
+
+def _render_my_listings(rows: list[dict]) -> None:
+    if not rows:
+        st.caption("No active Item Market listings.")
+        return
+    df = pd.DataFrame(rows)
+    n_fix = int(df["New price"].notna().sum())
+    st.markdown(f"**Your listings**: {len(df)} active · {n_fix} worth re-pricing")
+    st.dataframe(
+        df.sort_values(["New price", "Item"], na_position="last"),
+        width="stretch",
+        hide_index=True,
+        column_order=("Item", "Quality", "Amount", "Your price", "Cheapest other", "Cheaper listings", "New price", "Status"),
+        column_config={c: st.column_config.NumberColumn(format="%,.0f") for c in ("Amount", "Your price", "Cheapest other", "New price")},
+    )
+    st.markdown(f"[**Open your listings →**]({VIEW_LISTINGS_URL})")
+    st.caption(
+        "Checked against the market this run: your own listing is left out, and weapon/armor copies only compete "
+        "with copies of the same quality or better. **New price** is $1 under the cheapest other listing, never under "
+        "what a shop pays or half Torn's reference price; when you're cheapest by a wide margin it's what you could ask."
     )

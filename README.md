@@ -2,7 +2,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/drouo/TornHoarder)](https://github.com/drouo/TornHoarder/releases)
 
-**TornHoarder** turns a hoard of Torn items into cash without giving anything away. It pulls your inventory through the Torn API, prices every item against the live Item Market, and decides *how* each one should go: dump it, undercut, hold out for top dollar, sell it to a city shop, or keep it. Then it does the tedious part in your browser. A Tampermonkey script fills Add Listing prices and walks you through city-shop sales with one button. Every sale is still your click.
+**TornHoarder** turns a hoard of Torn items into cash without giving anything away. It pulls your inventory through the Torn API, prices every item against the live Item Market, and decides *how* each one should go: dump it, undercut, hold out for top dollar, sell it to a city shop, or keep it. Then a Tampermonkey script does the tedious part in your browser, with one button you click in the same spot over and over: once on each city shop page, then on the Item Market's Add Listing page. Every sale and listing is still your click.
 
 Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.com/profiles.php?XID=3968250)) as *Torn Market Analyzer*. Now maintained by [TheOldFarmer [3653623]](https://www.torn.com/profiles.php?XID=3653623).
 
@@ -11,205 +11,199 @@ Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.c
 1. Install Python 3.10+, then run `pip install -r requirements.txt`.
 2. Start the app with `streamlit run app/streamlit_app.py`. On Windows you can use `powershell -ExecutionPolicy Bypass -File tools\server.ps1 start` instead.
 3. Open http://localhost:8501, enter a **Limited** Torn API key, choose your **Sell categories**, and click **Run**. The first run reads every weapon/armor copy's stats and takes a while. Those stats never change, so later runs reuse them (`data/uid_stats.json`) and only fetch fresh market prices.
-4. On the **Autofill script** tab, click the link to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together.
-5. On the **Sell plan** tab, click **Start shop run →** for city-shop sales, then open Torn's Add Listing page for everything else.
+4. On the **Autofill script** tab, click the link to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together. The app serves the script at `http://127.0.0.1:9999/tornhoarder.user.js`. After each **Run**, Tampermonkey's *Check for userscript updates* picks up the new prices.
+5. Check the **Sell plan** tab, and change any plan or **Keeping** number you disagree with.
+6. Click **Start shop run →** and sell the Shop items (see [Shop run](#shop-run)).
+7. Click **Open Add Listing →** and list everything else (see [Listing on the Item Market](#listing-on-the-item-market)).
 
-The rest of this README describes how the pricing works.
+After a shop run, click **Run** again before listing so the plan no longer counts what you just sold.
 
-## Output
+The app header shows the version you're running; the userscript carries the same version number.
 
-For each matched item, the app suggests:
+## Input sources
 
-- **Fast-sell price** (optimized for quick execution)
-- **Fair price** (robust central estimate)
-- **Greedy price** (upper-quartile strategy)
+| Source | What it does |
+|---|---|
+| **API inventory** (default) | Pulls your inventory with `user/inventory`, limited to your **Sell categories**, and reads each weapon/armor copy's rolls. Equipped items are skipped. |
+| **Paste items** | Paste the text from Torn's Add Listing page. Item names and quantities are matched against `data/torn_item_dictionary.csv`; lines tagged **Equipped** or **Untradable** are ignored, and unmatched lines are shown in the UI. |
+| **Single item** | Price one item by name or ID, with how many you own. Add a copy's `uid` to price that exact weapon/armor copy from its real stats. |
 
-The UI also shows parsed items, unmatched items, and market diagnostics.
+The sell plan, shop run and Add Listing automation are built for **API inventory**, since they need your real quantities and copy stats.
 
+## How pricing works
 
+### Market fetch (read-only)
 
-## How it works
+- Calls the Torn v2 endpoint `GET /market/{item_id}/itemmarket` and loads up to **100 sell listings** per item (`price`, `amount`).
+- A token-bucket rate limiter keeps requests under Torn's limits.
+- The item catalog (`torn/items`: reference market price, shop sell price, vendor, description) is re-downloaded once it's more than 24h old.
 
-### 1) Parsing & matching
+### Cleaning the order book
 
-- Paste the text copied from Torn’s **Add Listing** page.
-- The parser extracts **item names** and **quantities**.
-- Lines tagged as **Equipped** or **Untradable** are ignored.
-- Item names are resolved through a local dictionary:
-  - `data/torn_item_dictionary.csv` (columns: `key`, `id`)
+- Sort by price and compute cumulative quantity (market depth).
+- Estimate the center and spread with the **median** and **MAD** (median absolute deviation), and flag extreme prices by robust z-score.
+- Detect **thin/exclusive** markets: total clean units ≤ 200, or one price level holding ≥ 50% of the clean volume.
+- Drop suspected **anchor listings**, such as bait listings far under the median, unless that would leave no data.
 
-> Matching is **dictionary-based**. Unmatched items are displayed in the UI.
+### Price suggestions
 
-### 2) Market fetch (read-only)
+| Price | How |
+|---|---|
+| **Fast-sell** | $1 under the cheapest clean listing. Buyers take the cheapest listing first. |
+| **Fair** | Weighted median (normal markets) or unweighted median (thin markets). |
+| **Greedy** | Upper quartile (Q3), weighted or unweighted the same way. |
 
-- Calls Torn v2 endpoint: `GET /market/{item_id}/itemmarket`
-- Loads up to **100 sell listings** per item (`price`, `amount`).
-- Uses a simple **token-bucket rate limiter** to stay under Torn’s request limits.
+### Weapons and armor
 
-### 3) Market cleaning & market-type detection
+Copies of the same weapon differ by their rolls (damage and accuracy for weapons, armor for armor). TornHoarder fits a stat-value model per item from `data/torn_item_profiles.json`, turns each copy's rolls into a **quality** score, and prices it from a quality curve built from the market's own listings. The **Pricing table** tab shows these copy-level prices, and **Special finds** lists copies worth well above the item's standard price.
 
-Per item, the order book is processed as follows:
+### Price guards
 
-- Sort by price and compute **cumulative quantity** (market depth).
-- Estimate robust center/spread using **median** and **MAD** (median absolute deviation).
-- Flag extreme prices using a **robust z-score**.
-- Detect **thin / exclusive** markets when either:
-  - total clean units ≤ **200**, or
-  - a single price level represents ≥ **50%** of the clean volume.
-- Remove suspected **anchor listings** for pricing (unless removal would leave no data).
+Nothing is ever listed for a silly price:
 
-### 4) Price suggestions
+- Fast-sell ignores listings under half the clean median, so one $1 troll listing can't set the floor.
+- A listing is never priced below what a city shop would pay after the 5% tax (`ceil(shop price / 0.95)`). Below that, the item goes to the shop instead.
+- A listing more than 50% under Torn's reference market price is held back, not listed.
+- No weapon/armor copy lists below the item's fast-sell floor, whatever its quality band says.
 
-All prices are computed from the **cleaned** order book:
+## Sell plan
 
-- **Fair price**
-  - Weighted median (normal markets) or unweighted median (thin/exclusive markets)
-- **Greedy price**
-  - Upper quartile (Q3), weighted or unweighted depending on market type
-- **Fast-sell price**
-  - **$1 under the cheapest clean listing**: buyers take the cheapest listing first
+Only items in your **Sell categories** are pulled and priced; everything else is never listed. The default is:
 
-### 5) Sell plan
+- unequipped weapons (Primary, Secondary, Melee) and armor (Defensive),
+- general loot (Clothing, Collectible, Jewelry, Other, Tool, Material, Car),
+- museum items (Plushie, Flower, Artifact).
 
-Only items in your **Sell categories** are pulled and priced; everything else is never listed. The default is unequipped weapons (Primary, Secondary, Melee) and armor (Defensive), plus general loot (Clothing, Collectible, Jewelry, Other, Tool, Material, Car) and museum items (Plushie, Flower, Artifact). Drugs, medical, boosters, energy drinks, supply packs, books and temporary weapons are kept unless you add them.
+Drugs, medical items, boosters, energy drinks, alcohol, candy, supply packs, books and temporary weapons are kept unless you add them.
 
-Each item in a sell category gets a plan automatically. The **Sell plan** tab lets you change it, and changes are saved in `~/.tma_config.json`:
+Each item gets a plan automatically. The **Sell plan** tab lets you change it, and your changes are saved in `~/.tma_config.json`:
 
 | Plan | When (defaults) | List price |
 |---|---|---|
 | **Dump** | worth < $20k each and the stack < $1M | 5% under the cheapest listing |
 | **Competitive** | worth ≥ $20k each, or a stack ≥ $1M | cheapest listing − $1 |
-| **Top dollar** | weapon/armor copy with quality ≥ 50, or ≥ $20k with < 20 listings | Greedy (upper quartile) |
-| **Shop** | a city shop pays ≥ the market price after Torn's 5% sales tax | the shop's price, no listing |
-| **Keep** | only when you choose it | never listed |
+| **Top dollar** | a weapon/armor copy with quality ≥ 50, or a Competitive item with < 20 listings | Greedy (upper quartile) |
+| **Shop** | a city shop pays at least the market price after Torn's 5% sales tax | the shop's price; not listed |
+| **Keep** | only when you choose it | never sold |
 
-The thresholds can be changed under **Rules**. The autofill script fills each row from its plan and leaves Shop and Keep rows blank. The item catalog (reference and shop prices) re-downloads from `torn/items` once it's more than 24h old.
+Every threshold can be changed under **Rules**. **Est. proceeds** is after the 5% item-market tax.
 
+## Keeping what you need
 
+Only the surplus is ever sold. The **Keeping** column shows how many of each item stay in your inventory, and **Selling** shows the rest. Type a number in **Keeping** to set it by hand; that number is saved. The defaults:
 
-### 7) Listing on the Item Market
+- **Crime items are all kept.** That covers everything an Organized Crime requires (from Torn's `torn/organizedcrimes`) and everything whose in-game description says a crime uses it (Forgery, Disposal, Graffiti, Arson…). Untick **Keep all crime items** under Rules to keep only a stock and sell the rest: 1 of each reusable OC tool, 3 of each item an OC uses up, and 1 of every other crime item.
+- **Clothing and Collectibles:** 1 of each is kept, so only duplicates are sold. Change the categories under Rules.
+- **Weapons and armor:** the copies kept are your best by quality. Equipped gear is never touched.
+- **Everything else:** 0 kept.
 
-After the shop run, open **Add Listing** (the Sell plan tab links to it). The userscript puts one green button in the same spot:
+## Shop run
 
-1. **Review:** the panel lists every planned listing (item × quantity × price, with the total). Click a line to leave it out. If Torn still has selections from an earlier session, the panel warns you to clear them first.
-2. **Fill N items:** goes tab by tab through the categories that hold planned items, lets Torn load each full list, and fills it:
-   - stacks get quantity = **Selling** and the price,
-   - weapon/armor copies get **Select** and a price from that copy's rolls (good rolls go to Top dollar, and no copy lists below the item's floor).
-   Keep, crime items, your best copies and copies routed to a shop are held back, with the reason shown. The *anonymous (+10% fee)* box is never touched.
-3. **Add N listings to market · $X:** the total is Torn's own. The button presses Torn's ADD TO MARKET (then **Confirm**, if Torn asks).
+Shop-plan items are sold to city shops with one button. **Start shop run →** on the Sell plan tab opens the first shop, and the userscript puts one green button in the same spot on every shop page:
 
-A full plan of about 650 rows fills in roughly 3½ minutes. **Start over** clears Torn's selections.
+1. **Review:** the panel above the button lists each item × quantity × price and the total. Click a line to leave it out.
+2. **Sell N item(s) here · $X:** fills only this run's Shop items (weapon/armor copies are matched by their armoryID; on Big Al's it ticks each copy) and opens Torn's *Are you sure?* with the total.
+3. **Confirm: sell …:** confirms that one sale.
+4. **Next: <shop> →:** goes to the next shop, until **Shop run done ✓**.
 
-### Keeping what you need
+Each shop page also reports what that shop really buys back to the app (`POST 127.0.0.1:9999/shop-report`, stored in `data/shop_buys.json`). The catalog's vendor is only a guess; Big Al's, for example, buys only a few of the weapons it stocks. Later runs send items only to shops seen buying them, and anything no shop takes falls back to its market plan.
 
-Only the surplus is ever sold. The **Keeping** column on the Sell plan tab shows how many of each item stay in your inventory; type a number there to set it by hand. The defaults:
+## Listing on the Item Market
 
-- **Crime items are all kept** by default: everything an Organized Crime requires (from Torn's `torn/organizedcrimes` list) and everything whose in-game effect says a crime uses it (Forgery, Disposal, Graffiti, Arson…). Untick **Keep all crime items** under Rules to keep only a stock and sell the rest: 1 of each reusable OC tool, 3 of each item an OC uses up, and 1 of other crime items.
-- **Clothing and Collectibles**: keep 1 of each, so only duplicates are sold.
-- **Weapons and armor**: the copies kept are your best by quality.
+**Open Add Listing →** on the Sell plan tab opens Torn's Add Listing page, where the userscript puts one green button in the same spot:
 
-Before anything sells, the shop run lists each item × quantity × price above its button (click a line to leave it out), and Torn asks you to confirm. On Add Listing, click the status box to see every row it filled and every row it held, and why.
+1. **Review:** the panel lists every planned listing (item × quantity × price) and the total. Click a line to leave it out. If Torn still has selections from an earlier visit (Torn keeps them across reloads), the panel warns you to clear them first.
+2. **Fill N item(s) for listing:** goes tab by tab through the categories that hold planned items, lets Torn load each full list, and fills it:
+   - stacks get quantity = **Selling** and the list price;
+   - weapon/armor copies get **Select** and a price from that copy's own rolls. Good rolls go to Top dollar, and no copy lists below the item's floor.
 
-### 6) Shop run
+   Held back, with the reason shown: Keep items, crime items, your best copies, copies routed to a shop, and anything a price guard stops. The *anonymous (+10% fee)* box is never touched. Click the status box to see every row filled and every row held.
+3. **Add N listing(s) to market · $X:** the total is Torn's own, read from the page. The button presses Torn's ADD TO MARKET, and turns into **Confirm** if Torn asks.
 
-Shop-plan items are sold to city shops with one button. **Start shop run →** on the Sell plan tab opens the first shop. On every shop page the userscript puts one green button in the same spot:
+A full plan of about 650 rows across 13 tabs fills in roughly 3½ minutes. **Start over** clears all of Torn's selections.
 
-1. **Sell N item(s) here · $X**: fills only this run's Shop items (weapon/armor copies matched by their armoryID) and opens Torn's "Are you sure?" with the total.
-2. **Confirm: sell …**: confirms that one sale.
-3. **Next: <shop> →**: goes to the next shop, until **Shop run done ✓**.
+## App tabs
 
-Each shop page also reports what it really lists back to the app's local server (`POST 127.0.0.1:9999/shop-report`, stored in `data/shop_buys.json`). The catalog's vendor is only a guess, and Big Al's, for example, buys a few of the weapons it stocks. Later runs route items only to shops seen buying them. Shop-plan items still in your inventory on the Add Listing page are listed with their market plan instead.
-
-## Project structure
-
-```
-
-TornHoarder/
-├─ app/
-│  ├─ streamlit_app.py      # input form + pipeline orchestration
-│  ├─ paths.py               # shared path constants
-│  └─ ui/                    # one results tab per module
-│     ├─ sell_plan.py        # per-item Dump/Competitive/Top/Shop/Keep plans
-│     ├─ pricing_table.py    # price suggestions + listing-text builder
-│     ├─ special_finds.py    # copies priced above the item's standard curve
-│     ├─ autofill_export.py  # Tampermonkey userscript generation/download
-│     └─ diagnostics.py      # parsed/unmatched/market/long/summary tables
-├─ src/
-│  └─ tma/
-│     ├─ http_client.py      # rate limiting, retries, Torn API error handling
-│     ├─ inventory.py        # user/inventory fetch + pagination
-│     ├─ inventory_matcher.py
-│     ├─ market_fetch.py     # item-market listings fetch (concurrent)
-│     ├─ market_enrichment.py
-│     ├─ sell_plan.py        # sell-plan classifier (pure logic)
-│     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
-│     ├─ item_stats.py       # stat-value model / quality-curve fitting
-│     ├─ quality.py
-│     ├─ userscript.py
-│     ├─ config.py           # local API-key storage
-│     └─ __init__.py
-├─ data/
-│  ├─ torn_item_dictionary.csv
-│  └─ torn_item_profiles.json
-├─ tools/
-│  ├─ dictionary_v2.py
-│  ├─ calibrate_model.py
-│  ├─ update_server.py       # serves the autofill script for Tampermonkey auto-update
-│  └─ output/
-│     ├─ torn_items_v2.json
-│     └─ torn_item_dictionary.csv
-├─ tests/
-├─ requirements.txt
-└─ README.md
-
-````
-
-
-
-## Requirements
-
-- Python **3.10+**
-- Install dependencies from `requirements.txt`
-
-
-
-## Run locally
-
-```bash
-pip install -r requirements.txt
-streamlit run app/streamlit_app.py
-````
-
-Open the local URL shown in the terminal (typically `http://localhost:8501`).
-
-
-
-## Regenerate the item dictionary
-
-If Torn adds/renames items, regenerate the dictionary from the API:
-
-```bash
-python tools/dictionary_v2.py
-```
-
-The script saves:
-
-* `tools/output/torn_items_v2.json`
-* `tools/output/torn_item_profiles.json`
-* `tools/output/torn_item_dictionary.csv`
-
-Copy the generated CSV and profiles JSON into `data/` (`data/torn_item_dictionary.csv`, `data/torn_item_profiles.json`) for the app to use the refreshed data. The app loads the item dictionary and the stat/price profile model from `data/`.
-
-
+| Tab | Contents |
+|---|---|
+| **Sell plan** | Per-item plan, Keeping/Selling, list price, estimated proceeds, Rules, and the shop run and Add Listing links. |
+| **Pricing table** | Fast/fair/greedy prices, copy-level prices from your stats, and a plain-text listing builder. |
+| **Special finds** | Weapon/armor copies priced well above the item's standard curve. |
+| **Autofill script** | Install link and download for the Tampermonkey userscript. |
+| **Diagnostics** | Parsed and unmatched items, raw market data and summary tables. |
 
 ## Torn API key & privacy
 
 | | |
 |---|---|
 | **Key access level** | **Limited**: inventory pulls need `user → inventory`. Market and item lookups work with any key. |
-| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `market/{id}/itemmarket`, `torn/items`. All read-only. |
+| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `market/{id}/itemmarket`, `torn/items`, `torn/organizedcrimes`. All read-only. |
 | **Key storage** | Only on your PC, in `~/.tma_config.json`, and only if **Remember API key** is ticked. |
 | **Data sharing** | None. Requests go straight from your PC to `api.torn.com`. The userscript talks only to Torn and to this app on `127.0.0.1` (your own machine). |
 | **Purpose** | Pricing and selling your own items. |
 
 TornHoarder never buys, sells or lists anything by itself. The userscript fills in fields and shows one button, and each sale or listing happens only when you click it: one click, one action, in line with Torn's scripting rules.
+
+## Project structure
+
+```
+TornHoarder/
+├─ app/
+│  ├─ streamlit_app.py       # input form + pipeline orchestration
+│  ├─ paths.py               # shared path constants
+│  └─ ui/                    # one results tab per module
+│     ├─ results.py          # price overview + tab layout
+│     ├─ sell_plan.py        # plans, Keeping/Selling, Rules, shop run + Add Listing links
+│     ├─ pricing_table.py    # price suggestions + listing-text builder
+│     ├─ special_finds.py    # copies priced above the item's standard curve
+│     ├─ autofill_export.py  # userscript generation, install link, update server start
+│     ├─ diagnostics.py      # parsed/unmatched/market/summary tables
+│     └─ format.py
+├─ src/
+│  └─ tma/
+│     ├─ http_client.py      # rate limiting, retries, Torn API error handling
+│     ├─ inventory.py        # user/inventory fetch, copy stats + stats cache
+│     ├─ inventory_matcher.py
+│     ├─ market_fetch.py     # item-market listings fetch (concurrent)
+│     ├─ market_enrichment.py
+│     ├─ sell_plan.py        # plan classifier, reserves, price guards (pure logic)
+│     ├─ shops.py            # city-shop routing + learned shop buy lists
+│     ├─ crime_items.py      # OC requirements + crime-item detection
+│     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
+│     ├─ item_stats.py       # stat-value model / quality-curve fitting
+│     ├─ quality.py
+│     ├─ userscript.py       # Tampermonkey script template (shop run + Add Listing)
+│     ├─ autoupdate_server.py # serves the script, receives shop reports
+│     ├─ config.py           # local settings: API key, plans, rules, reserves
+│     └─ __init__.py         # __version__
+├─ data/
+│  ├─ torn_item_dictionary.csv
+│  └─ torn_item_profiles.json  # (generated, git-ignored: tornhoarder.user.js,
+│                              #  shop_buys.json, oc_items.json, uid_stats.json)
+├─ tools/
+│  ├─ server.ps1             # start/stop the app on Windows
+│  ├─ update_server.py       # serve the script without the app running
+│  ├─ dictionary_v2.py
+│  └─ calibrate_model.py
+├─ tests/
+├─ requirements.txt
+└─ README.md
+```
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+The userscript tests run the generated script in Node to check the listing decisions; they're skipped if `node` isn't installed.
+
+## Regenerate the item dictionary
+
+The app refreshes `data/torn_item_dictionary.csv` and `data/torn_item_profiles.json` from `torn/items` on its own once they're more than 24h old. To rebuild them by hand:
+
+```bash
+python tools/dictionary_v2.py
+```
+
+The script writes `tools/output/torn_items_v2.json`, `tools/output/torn_item_profiles.json` and `tools/output/torn_item_dictionary.csv`; copy the CSV and profiles JSON into `data/`.

@@ -40,6 +40,14 @@ def fetch_my_listings(
     return out, None
 
 
+def drop_listed_copies(entries: list, listed: list[dict]) -> list:
+    """Inventory entries minus weapon/armor copies that are on the market
+    (matched by uid). Stacks can't be matched one by one; listing them already
+    takes them out of the inventory count."""
+    uids = {str((l.get("item") or {}).get("uid")) for l in listed if (l.get("item") or {}).get("uid")}
+    return [e for e in entries if not (e.uid and str(e.uid) in uids)]
+
+
 def market_listings(wide_row: dict) -> list[dict]:
     """[{price, amount, quality}] from a market_fetch wide row."""
     out = []

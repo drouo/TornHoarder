@@ -389,7 +389,15 @@ if submitted:
             inv = fetch_inventory(sess, api_key, categories=pull_categories, on_progress=report, bucket_take=bucket.take)
             for err in inv.errors:
                 st.caption(f"inventory: {err}")
-            entries, df_parsed, agg = to_rows(inv.entries)
+            # A copy you've listed must never be planned for sale again, even if
+            # Torn's inventory still reports it for a while after listing.
+            listed, listed_err = my_listings.fetch_my_listings(sess, api_key, bucket)
+            if listed_err:
+                st.caption(f"Couldn't read your Item Market listings ({listed_err}).")
+            inv_entries = my_listings.drop_listed_copies(inv.entries, listed)
+            if len(inv_entries) < len(inv.entries):
+                st.caption(f"Left out {len(inv.entries) - len(inv_entries)} copy(ies) you already have listed.")
+            entries, df_parsed, agg = to_rows(inv_entries)
             unmatched: list = []
             if not entries:
                 run_box.update(label="Inventory empty", state="error")
@@ -535,13 +543,10 @@ if submitted:
     per_id_qty: dict[int, int] = {}
     for iid, qty in agg:
         per_id_qty[iid] = per_id_qty.get(iid, 0) + qty
-    # Your active listings are checked against the market too; their items
-    # aren't in your inventory any more, so they're fetched as extras.
-    listed: list[dict] = []
-    if source == "API inventory":
-        listed, listed_err = my_listings.fetch_my_listings(sess, api_key, bucket)
-        if listed_err:
-            st.caption(f"Couldn't read your Item Market listings ({listed_err}).")
+    # Your active listings (read with the inventory) are checked against the
+    # market too; their items aren't in your inventory, so they're fetched as extras.
+    if source != "API inventory":
+        listed = []
     listed_ids = {int((l.get("item") or {}).get("id")) for l in listed if (l.get("item") or {}).get("id")}
     # Equipped gear is never pulled with the inventory, so it's priced as an extra too.
     equipment = (profile_bundle(api_key).get("equipment") or []) if source == "API inventory" else []

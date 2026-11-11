@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tma.my_listings import fetch_my_listings, market_listings, review_listing
+from tma.inventory import InventoryEntry
+from tma.my_listings import drop_listed_copies, fetch_my_listings, market_listings, review_listing
 
 
 def mine(price, amount=5, uid=None, quality=None, iid=180, name="Beer"):
@@ -53,6 +54,18 @@ class ReviewListingTest(unittest.TestCase):
     def test_market_listings_reads_the_wide_row(self):
         row = {"item_id": 1, "price_1": 10, "amount_1": 2, "quality_1": None, "price_2": None, "amount_2": None}
         self.assertEqual(market_listings(row), [{"price": 10.0, "amount": 2, "quality": None}])
+
+
+class DropListedCopiesTest(unittest.TestCase):
+    def test_a_listed_copy_is_left_out_even_if_inventory_still_shows_it(self):
+        inv = [
+            InventoryEntry(item_id=240, name="Type 98 Anti Tank", amount=1, equipped=False, uid="17885770351"),
+            InventoryEntry(item_id=240, name="Type 98 Anti Tank", amount=1, equipped=False, uid="111"),
+            InventoryEntry(item_id=180, name="Beer", amount=5, equipped=False, uid=None),
+        ]
+        listed = [mine(21087329, amount=1, uid=17885770351, quality=8.76, iid=240, name="Type 98 Anti Tank")]
+        kept = drop_listed_copies(inv, listed)
+        self.assertEqual([(e.item_id, e.uid) for e in kept], [(240, "111"), (180, None)])
 
 
 class FetchMyListingsTest(unittest.TestCase):

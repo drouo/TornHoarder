@@ -56,14 +56,16 @@ MARKET = {
 
 
 class ShopFlipsTest(unittest.TestCase):
-    def test_only_profitable_items_after_tax_best_total_first(self):
+    def test_only_profitable_items_ranked_by_what_will_actually_sell(self):
         df = scan_flips(SHOP_ITEMS, MARKET)
         self.assertEqual(list(df["Item"]), ["Single Red Rose", "Cagoutte"])
-        rose = df.iloc[0]
-        # (1450 - 1) * 0.95 - 175 = 1201.55
-        self.assertEqual((rose["Profit / unit"], rose["Profit if all stock"], rose["Cash needed"]), (1202, round(1201.55 * 288), 50400))
-        self.assertEqual(rose["Listed for sale"], 15)
-        self.assertEqual(df.iloc[1]["In stock"], 0)
+        rose = df[df["Item"] == "Single Red Rose"].iloc[0]
+        # (1450 - 1) * 0.95 - 175 = 1201.55 a unit; 288 in stock but only 15 listed for sale.
+        self.assertEqual((rose["Sell at"], rose["Profit / unit"], rose["Worth buying"]), (1449.0, 1202, 15))
+        self.assertEqual((rose["Profit"], rose["Cost"]), (round(1201.55 * 15), 2625))
+        # Sold out: nothing worth buying now, but still shown for after a restock.
+        cag = df[df["Item"] == "Cagoutte"].iloc[0]
+        self.assertEqual((cag["In stock"], cag["Worth buying"], cag["Profit"]), (0, 0, 0))
 
     def test_stock_log_appends_with_one_header(self):
         with TemporaryDirectory() as d:

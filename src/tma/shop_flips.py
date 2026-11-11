@@ -43,9 +43,12 @@ def fetch_city_shops(
 
 
 def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataFrame:
-    """One row per city item that would resell at a profit, best total first.
+    """One row per city item that would resell at a profit, best first.
 
-    Resale price is $1 under the cheapest current listing, after tax.
+    Resale price is $1 under the cheapest current listing, after tax. Cash is
+    no object, so the limit is how many will sell: "Worth buying" assumes you
+    can sell about as many as are listed now (capped by shop stock) without
+    sinking the price, and items are ranked by the profit on that many.
     """
     rows = []
     for it in shop_items:
@@ -53,27 +56,28 @@ def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataF
         if not listings or not it["price"]:
             continue
         floor = min(l["price"] for l in listings)
-        resale = (floor - 1) * (1.0 - MARKET_FEE)
-        profit = resale - it["price"]
+        profit = (floor - 1) * (1.0 - MARKET_FEE) - it["price"]
         if profit <= 0:
             continue
+        listed = int(sum(l.get("amount") or 0 for l in listings))
+        units = min(it["stock"], listed)
         rows.append({
             "Item": it["item_name"],
             "Shop": it["shop"],
             "In stock": it["stock"],
-            "Shop price": it["price"],
-            "Cheapest listing": floor,
+            "Buy at": it["price"],
+            "Sell at": floor - 1,
             "Profit / unit": round(profit),
-            "Margin %": round(profit / it["price"] * 100.0, 1),
-            "Profit if all stock": round(profit * it["stock"]),
-            "Cash needed": round(it["price"] * it["stock"]),
-            "Listed for sale": int(sum(l.get("amount") or 0 for l in listings)),
+            "Listed for sale": listed,
+            "Worth buying": units,
+            "Profit": round(profit * units),
+            "Cost": round(it["price"] * units),
             "item_id": it["item_id"],
         })
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    return df.sort_values(["Profit if all stock", "Profit / unit"], ascending=False).reset_index(drop=True)
+    return df.sort_values(["Profit", "Profit / unit"], ascending=False).reset_index(drop=True)
 
 
 def log_stock(path: Path, shop_items: list[dict], stamp: str) -> int:

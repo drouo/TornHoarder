@@ -7,6 +7,7 @@ import time
 import pandas as pd
 import streamlit as st
 
+from tma.fmt import money
 from tma.http_client import TokenBucket, session_for_requests
 from tma.market_fetch import fetch_all_item_markets
 from tma.shop_flips import fetch_city_shops, log_stock, scan_flips
@@ -59,20 +60,30 @@ def render_shop_scan(api_key: str) -> None:
             return
         in_stock = df[df["In stock"] > 0]
         out = df[df["In stock"] == 0]
-        money = ("Shop price", "Cheapest listing", "Profit / unit", "Profit if all stock", "Cash needed")
-        cfg = {c: st.column_config.NumberColumn(format="localized") for c in money}
+        cfg = {
+            **{c: st.column_config.NumberColumn(format="compact") for c in ("Buy at", "Sell at", "Profit / unit", "Profit", "Cost")},
+            **{c: st.column_config.NumberColumn(format="localized") for c in ("In stock", "Listed for sale", "Worth buying")},
+        }
         if in_stock.empty:
             st.info("Every profitable item is sold out right now.")
         else:
-            st.markdown(f"**In stock and profitable** ({len(in_stock)}):")
-            st.dataframe(in_stock.drop(columns=["item_id"]), width="stretch", hide_index=True, column_config=cfg)
+            total = in_stock["Profit"].sum()
+            st.markdown(
+                f"**In stock and profitable** ({len(in_stock)}): about **{money(total)}** profit buying "
+                f"{money(in_stock['Cost'].sum())} worth".replace("$", "\\$")
+            )
+            st.dataframe(
+                in_stock, width="stretch", hide_index=True, column_config=cfg,
+                column_order=("Item", "Shop", "Buy at", "Sell at", "Profit / unit", "Worth buying", "Profit", "Cost", "In stock"),
+            )
         if not out.empty:
             st.markdown(f"**Profitable but sold out** ({len(out)}): check back after a restock.")
             st.dataframe(
-                out.drop(columns=["item_id", "In stock", "Profit if all stock", "Cash needed"]),
-                width="stretch", hide_index=True, column_config=cfg,
+                out, width="stretch", hide_index=True, column_config=cfg,
+                column_order=("Item", "Shop", "Buy at", "Sell at", "Profit / unit", "Listed for sale"),
             )
         st.caption(
-            "Selling many of one item pushes the price down: compare **Listed for sale** with how many you'd add. "
-            "Buying is your click on the shop page."
+            "**Worth buying** is capped at how many are listed for sale now, on the idea that you can sell about "
+            "that many without sinking the price; **Profit** and **Cost** are for that many. Buying is your click "
+            "on the shop page."
         )

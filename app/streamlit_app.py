@@ -25,11 +25,11 @@ from app.ui.results import render_results
 from app.ui.shop_scan import render_shop_scan
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
-from tma import museum, my_listings, profile
+from tma import http_client, museum, my_listings, profile
 from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
-from tma.http_client import TokenBucket, session_for_requests
+from tma.http_client import session_for_requests, shared_bucket
 from tma.inventory import (
     fetch_inventory,
     fetch_item_stats_cached,
@@ -47,7 +47,6 @@ from tma.market_fetch import fetch_all_item_markets
 from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
 
 MAX_WORKERS = 5
-RATE_LIMIT_PER_MIN = 90
 MARKET_PHASE_TIMEOUT_S = 1200.0
 
 
@@ -92,6 +91,10 @@ st.set_page_config(page_title=f"TornHoarder v{__version__}", layout="centered")
 # Serve the autofill script for Tampermonkey's update checks from app start,
 # not only once a finished run has rendered the Autofill tab.
 autofill_export._ensure_update_server()
+
+# Every Torn call in this process shares one limiter, including the one-off
+# calls (profile, museum, points) that don't pass a bucket of their own.
+http_client.default_bucket = shared_bucket()
 
 if "api_key" not in st.session_state:
     st.session_state["api_key"] = load_api_key()
@@ -346,7 +349,7 @@ if submitted:
         clear_api_key()
 
     sess = session_for_requests()
-    bucket = TokenBucket(RATE_LIMIT_PER_MIN)
+    bucket = shared_bucket()
     clock_run = time.monotonic()
     run_box = st.status("Preparing run…", expanded=True)
 
@@ -578,6 +581,23 @@ if submitted:
         deadline_s=MARKET_PHASE_TIMEOUT_S,
     )
 
+    # Items that failed (usually Torn's rate limit, if something else is using
+    # the key too) get one more try before the plan is built without them.
+    failed = [iid for iid, row in per_id_rows.items() if "error" in row]
+    if failed and not truncated:
+        bar.progress(1.0, text=f"Retrying {len(failed)} item(s) that failed…")
+        retried, _ = fetch_all_item_markets(
+            sess, bucket, api_key, failed, {**per_id_qty, **{iid: 0 for iid in extra_ids}}, max_workers=1,
+        )
+        per_id_rows.update(retried)
+        market_errors = [str(r["error"]) for r in per_id_rows.values() if "error" in r]
+    still_failed = [iid for iid, row in per_id_rows.items() if "error" in row and iid in per_id_qty]
+    if still_failed:
+        names = ", ".join(str(per_id_rows[i].get("item_name") or (load_profiles(PROFILES_PATH).get(str(i)) or {}).get("name") or i) for i in still_failed[:8])
+        st.warning(
+            f"{len(still_failed)} item(s) couldn't be priced and are left out of this plan: {names}"
+            + ("…" if len(still_failed) > 8 else "") + ". Run again in a minute to include them."
+        )
     if truncated:
         elapsed_min = round((time.monotonic() - market_start) / 60.0, 1)
         st.warning(f"Market phase stopped after {elapsed_min} min; priced {len(per_id_rows)}/{n_uniq} distinct items.")

@@ -92,3 +92,14 @@ def isolate_stats_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PRICE_HISTORY_PATH", tmp_path / "price_history.csv")
     monkeypatch.setattr(paths, "MUSEUM_PATH", tmp_path / "museum_sets.json")
     monkeypatch.setattr(paths, "CITYSHOP_STOCK_PATH", tmp_path / "cityshop_stock.csv")
+
+
+@pytest.fixture(autouse=True)
+def unthrottled_api(monkeypatch):
+    """The app shares one Torn-rate limiter across the process; tests use mocked
+    sessions, so give them one that never waits."""
+    from tma import http_client
+
+    fast = http_client.TokenBucket(10**9, capacity=10**9)
+    monkeypatch.setattr(http_client, "shared_bucket", lambda: fast)
+    monkeypatch.setattr(http_client, "default_bucket", None)

@@ -41,6 +41,26 @@ class TokenBucket:
             time.sleep(0.01)
 
 
+# Torn allows 100 calls a minute per player, across every key and tool using
+# them. A small burst plus a steady rate keeps any 60s window at or under
+# BURST + RATE = 90, leaving room for other scripts on the same account.
+APP_RATE_PER_MIN = 80
+APP_BURST = 10
+_shared: Optional[TokenBucket] = None
+_shared_lock = threading.Lock()
+# When set, calls made without an explicit bucket are limited by it too.
+default_bucket: Optional[TokenBucket] = None
+
+
+def shared_bucket() -> TokenBucket:
+    """The one limiter every call in this process should share."""
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            _shared = TokenBucket(APP_RATE_PER_MIN, capacity=APP_BURST)
+        return _shared
+
+
 def session_for_requests(pool_size: int = 50) -> requests.Session:
     session = requests.Session()
     adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
@@ -100,6 +120,8 @@ def get_json_with_retry(
         take = bucket_take
     elif bucket is not None:
         take = bucket.take
+    elif default_bucket is not None:
+        take = default_bucket.take
     else:
         take = lambda n=1: None  # noqa: E731
     backoff = backoff0

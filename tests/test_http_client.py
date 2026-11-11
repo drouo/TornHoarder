@@ -64,6 +64,29 @@ class TokenBucketTest(unittest.TestCase):
         self.assertLessEqual(bucket.tokens, 0.01)
 
 
+class SharedLimitTest(unittest.TestCase):
+    def test_any_minute_stays_well_under_tornss_100(self):
+        from tma import http_client
+
+        # Worst case in any 60s window: a full burst plus a minute of refill.
+        self.assertLessEqual(http_client.APP_BURST + http_client.APP_RATE_PER_MIN, 90)
+        bucket = TokenBucket(http_client.APP_RATE_PER_MIN, capacity=http_client.APP_BURST)
+        self.assertEqual(bucket.tokens, http_client.APP_BURST)
+
+    def test_calls_without_a_bucket_use_the_default_one(self):
+        from tma import http_client
+
+        taken = []
+
+        class Recorder:
+            def take(self, n=1):
+                taken.append(n)
+
+        with patch.object(http_client, "default_bucket", Recorder()):
+            get_json_with_retry(FakeSession([FakeResponse(200, {"ok": True})]), None, "http://x", "key")
+        self.assertEqual(taken, [1])
+
+
 class GetJsonWithRetryTest(unittest.TestCase):
     def test_success_first_try(self):
         session = FakeSession([FakeResponse(200, {"ok": True})])

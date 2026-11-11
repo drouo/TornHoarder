@@ -8,13 +8,11 @@ import pandas as pd
 import streamlit as st
 
 from tma.fmt import money
-from tma.http_client import TokenBucket, session_for_requests
+from tma.http_client import session_for_requests, shared_bucket
 from tma.market_fetch import fetch_all_item_markets
 from tma.shop_flips import fetch_city_shops, log_stock, scan_flips
 
 from .. import paths
-
-RATE_LIMIT_PER_MIN = 90
 
 
 def render_shop_scan(api_key: str) -> None:
@@ -26,7 +24,7 @@ def render_shop_scan(api_key: str) -> None:
         )
         if st.button("Scan shops", key="scan_shops", disabled=not api_key):
             sess = session_for_requests()
-            bucket = TokenBucket(RATE_LIMIT_PER_MIN)
+            bucket = shared_bucket()
             with st.spinner("Reading city shop stock…"):
                 items, err = fetch_city_shops(sess, api_key, bucket)
             if err:

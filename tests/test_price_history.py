@@ -105,5 +105,29 @@ class PriceHistoryAppTest(unittest.TestCase):
         self.assertEqual((int(owned["my_qty"]), int(owned["units_listed"]), owned["category"]), (4, 15, "Plushie"))
 
 
+    def test_an_item_that_fails_once_is_retried_and_priced(self):
+        failed_once = set()
+
+        def flaky(self_, url, headers=None, params=None, timeout=None):
+            if f"/market/{OWNED_ID}/itemmarket" in url and OWNED_ID not in failed_once:
+                failed_once.add(OWNED_ID)
+                return FakeResponse({"error": {"code": 9, "error": "API disabled"}})
+            return _fake_get(self_, url, headers, params, timeout)
+
+        at = AppTest.from_file(str(APP))
+        at.run(timeout=30)
+        [sell] = [m for m in at.multiselect if m.key == "sell_categories"]
+        sell.set_value(["Plushie"]).run(timeout=30)
+        [key] = [t for t in at.text_input if t.key == "api_key_input"]
+        key.set_value("dummy-key").run(timeout=30)
+        with patch("requests.Session.get", flaky):
+            [run] = [b for b in at.button if b.label == "Run"]
+            run.click().run(timeout=60)
+        self.assertEqual(list(at.exception), [], [str(e) for e in at.exception])
+        self.assertEqual(failed_once, {OWNED_ID})
+        self.assertEqual(list(at.session_state["analysis"]["df_summary"]["item_id"]), [OWNED_ID])
+        self.assertFalse(any("couldn't be priced" in w.value for w in at.warning))
+
+
 if __name__ == "__main__":
     unittest.main()

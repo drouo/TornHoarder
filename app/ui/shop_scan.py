@@ -13,6 +13,7 @@ from tma.market_fetch import fetch_all_item_markets
 from tma.shop_flips import fetch_city_shops, log_stock, scan_flips
 
 from .. import paths
+from .page_progress import PageProgress
 
 
 def render_shop_scan(api_key: str) -> None:
@@ -25,9 +26,11 @@ def render_shop_scan(api_key: str) -> None:
         if st.button("Scan shops", key="scan_shops", disabled=not api_key):
             sess = session_for_requests()
             bucket = shared_bucket()
-            with st.spinner("Reading city shop stock…"):
-                items, err = fetch_city_shops(sess, api_key, bucket)
+            page = PageProgress()
+            page.update(0.01, "Reading city shop stock…")
+            items, err = fetch_city_shops(sess, api_key, bucket)
             if err:
+                page.clear()
                 st.error(f"Couldn't read city shops: {err}")
                 return
             stamp = pd.Timestamp.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -36,10 +39,12 @@ def render_shop_scan(api_key: str) -> None:
 
             def progress(done: int, total: int, row: dict) -> None:
                 bar.progress(done / total, text=f"Checked {done}/{total}: {row.get('item_name') or row.get('item_id')}")
+                page.update(0.02 + 0.98 * done / total, f"Checking shop prices {done}/{total} · {row.get('item_name') or row.get('item_id')}")
 
             start = time.monotonic()
             rows, _ = fetch_all_item_markets(sess, bucket, api_key, ids, {i: 0 for i in ids}, on_progress=progress)
             bar.empty()
+            page.clear()
             # Logged only once the scan completes, so a scan cut short by a page rerun isn't recorded twice.
             log_stock(paths.CITYSHOP_STOCK_PATH, items, stamp)
             st.session_state["shop_scan"] = {

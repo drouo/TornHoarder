@@ -20,6 +20,7 @@ from app.paths import (
     UID_STATS_PATH,
 )
 from app.ui import autofill_export
+from app.ui.page_progress import PageProgress
 from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
 from app.ui.shop_scan import render_shop_scan
@@ -352,6 +353,12 @@ if submitted:
     bucket = shared_bucket()
     clock_run = time.monotonic()
     run_box = st.status("Preparing run…", expanded=True)
+    page = PageProgress()
+    page.update(0.005, "Starting…")
+
+    def stop_run() -> None:
+        page.clear()
+        st.stop()
 
     with run_box:
         refreshed, cat_err = refresh_catalog_if_stale(sess, api_key, DICT_PATH, PROFILES_PATH)
@@ -380,6 +387,7 @@ if submitted:
             def report(cat: str, phase: str, detail: Optional[int]) -> None:
                 if phase == "done":
                     done_cats.append(cat)
+                    page.stage("inventory", len(done_cats), planned, f"Pulling your inventory · {cat}")
                     status_box.update(
                         label=f"Step 1/4 · pulling inventory {len(done_cats)}/{planned} categories",
                         state="running",
@@ -402,7 +410,7 @@ if submitted:
             if not entries:
                 run_box.update(label="Inventory empty", state="error")
                 st.warning("No tradable inventory found via the API.")
-                st.stop()
+                stop_run()
 
             uid_stats: dict = {}
             uid_errors: list[str] = []
@@ -415,6 +423,7 @@ if submitted:
 
                     def stat_report(done: int, total: int) -> None:
                         status_box.update(label=f"Step 2/4 · reading copy stats {done}/{total}…", state="running")
+                        page.stage("stats", done, total, f"Reading weapon/armor rolls · {done}/{total}")
 
                     uid_stats, uid_errors, n_cached = fetch_item_stats_cached(
                         sess, api_key, stats_targets, UID_STATS_PATH,
@@ -438,7 +447,7 @@ if submitted:
             result = match_inventory(raw, DICT_PATH)
             if not result.matched:
                 st.warning("No matches found.")
-                st.stop()
+                stop_run()
 
             df_parsed = (
                 pd.DataFrame([{"name": it.name, "id": it.item_id, "quantity": it.qty} for it in result.matched])
@@ -450,7 +459,7 @@ if submitted:
             items = [(it.item_id, it.qty, it.name) for it in result.matched]
             if not agg:
                 st.warning("No valid item IDs after matching.")
-                st.stop()
+                stop_run()
             unmatched = result.unmatched
             entries = None
             uid_stats = {}
@@ -469,7 +478,7 @@ if submitted:
                 single_name = id_to_name.get(iid)
                 if single_name is None:
                     st.error(f"No dictionary entry for item ID {query}.")
-                    st.stop()
+                    stop_run()
                 resolved = [(single_name, iid)]
             else:
                 low = query.lower()
@@ -480,10 +489,10 @@ if submitted:
                 elif len(cands) > 1:
                     shown = ", ".join(cands[:20])
                     st.error(f"{query!r} matches {len(cands)} items — be more specific. e.g. {shown}…")
-                    st.stop()
+                    stop_run()
                 else:
                     st.error(f"No item matches {query!r}.")
-                    st.stop()
+                    stop_run()
 
             single_name, iid = resolved[0]
             single_uid = st.session_state.get("single_uid", "").strip() or None
@@ -574,6 +583,7 @@ if submitted:
             rate = done / elapsed
             eta = f" · ETA ~{(total - done) / rate / 60.0:.0f} min"
         bar.progress(done / total, text=f"Priced {done}/{total}: {row.get('item_name') or row.get('item_id')}{eta}")
+        page.stage("market", done, total, f"Pricing {done}/{total} · {row.get('item_name') or row.get('item_id')}{eta}")
 
     per_id_rows, truncated = fetch_all_item_markets(
         sess,
@@ -591,6 +601,7 @@ if submitted:
     failed = [iid for iid, row in per_id_rows.items() if "error" in row]
     if failed and not truncated:
         bar.progress(1.0, text=f"Retrying {len(failed)} item(s) that failed…")
+        page.stage("market", 1, 1, f"Retrying {len(failed)} item(s) that failed…")
         retried, _ = fetch_all_item_markets(
             sess, bucket, api_key, failed, {**per_id_qty, **{iid: 0 for iid in extra_ids}}, max_workers=1,
         )
@@ -617,7 +628,7 @@ if submitted:
     if not per_id_rows:
         run_box.update(label="Market phase failed", state="error")
         st.error("No market data was retrieved.")
-        st.stop()
+        stop_run()
 
     # per_id_rows can hold error placeholders (no listings data) alongside
     # successful fetches — drop those before building the market table, or
@@ -631,16 +642,17 @@ if submitted:
     if not rows:
         run_box.update(label="Market phase failed", state="error")
         st.error("Every item lookup failed — no market data was retrieved. See the errors above.")
-        st.stop()
+        stop_run()
     df_market = _numeric_market(pd.DataFrame(rows))
 
     run_box.update(label="Step 4/4 · computing price suggestions…", state="running")
+    page.stage("compute", 0, 1, "Working out prices and plans…")
     with st.spinner("Computing price suggestions…"):
         df_long = wide_to_long(df_market)
         if df_long.empty:
             run_box.update(label="No valid listings found", state="error")
             st.warning("No valid listings found in the market data.")
-            st.stop()
+            stop_run()
 
         df_enriched = enrich_all_items(df_long)
         df_summary = build_summary_from_enriched(df_enriched).sort_values("item_name").reset_index(drop=True)
@@ -710,6 +722,7 @@ if submitted:
             f"in {(time.monotonic() - clock_run) / 60.0:.1f} min",
             state="complete",
         )
+        page.clear()
 
 if st.session_state.get("has_data"):
     render_results(st.session_state["analysis"])

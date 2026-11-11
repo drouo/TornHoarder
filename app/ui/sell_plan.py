@@ -360,15 +360,15 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
         column_config={
             "Plan": st.column_config.SelectboxColumn(options=[PLAN_LABELS[p] for p in PLANS], required=True),
             "Item": st.column_config.Column(disabled=True),
-            "Qty": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-            "Keeping": st.column_config.NumberColumn(min_value=0, step=1, format="%,.0f", help="How many you keep. Type a number to set it by hand."),
-            "Selling": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-            "List price": st.column_config.NumberColumn(min_value=1, step=1, format="%,.0f"),
-            "Est. proceeds": st.column_config.NumberColumn(format="%,.0f", disabled=True),
+            "Qty": st.column_config.NumberColumn(format="localized", disabled=True),
+            "Keeping": st.column_config.NumberColumn(min_value=0, step=1, format="localized", help="How many you keep. Type a number to set it by hand."),
+            "Selling": st.column_config.NumberColumn(format="localized", disabled=True),
+            "List price": st.column_config.NumberColumn(min_value=1, step=1, format="localized"),
+            "Est. proceeds": st.column_config.NumberColumn(format="localized", disabled=True),
             "Why": st.column_config.Column(disabled=True),
-            "Floor": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-            "Fair": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-            "Shop pays": st.column_config.NumberColumn(format="%,.0f", disabled=True),
+            "Floor": st.column_config.NumberColumn(format="localized", disabled=True),
+            "Fair": st.column_config.NumberColumn(format="localized", disabled=True),
+            "Shop pays": st.column_config.NumberColumn(format="localized", disabled=True),
         },
     )
 
@@ -451,7 +451,7 @@ def _render_shop_run(shop_run: dict) -> None:
         pd.DataFrame([{"Shop": s["name"], "Items": s["items"], "Payout": s["payout"]} for s in route]),
         width="stretch",
         hide_index=True,
-        column_config={"Payout": st.column_config.NumberColumn(format="%,.0f")},
+        column_config={"Payout": st.column_config.NumberColumn(format="localized")},
     )
     st.markdown(f"[**Start shop run →**]({route[0]['url']})")
     st.caption(
@@ -518,7 +518,7 @@ def _render_museum(sets: list[dict], point_price) -> None:
         ]),
         width="stretch",
         hide_index=True,
-        column_config={c: st.column_config.NumberColumn(format="%,.0f") for c in ("Exchanged", "Sold", "Gain / set", "Cost (ref)")},
+        column_config={c: st.column_config.NumberColumn(format="localized") for c in ("Exchanged", "Sold", "Gain / set", "Cost (ref)")},
     )
     st.caption(
         "**Exchanged** is the set's points at the cheapest points-market price; **Sold** is every piece at its "
@@ -543,7 +543,7 @@ def _render_my_listings(rows: list[dict]) -> None:
         width="stretch",
         hide_index=True,
         column_order=("Item", "Quality", "Amount", "Your price", "Cheapest other", "Cheaper listings", "New price", "Status"),
-        column_config={c: st.column_config.NumberColumn(format="%,.0f") for c in ("Amount", "Your price", "Cheapest other", "New price")},
+        column_config={c: st.column_config.NumberColumn(format="localized") for c in ("Amount", "Your price", "Cheapest other", "New price")},
     )
     st.markdown(f"[**Open your listings →**]({VIEW_LISTINGS_URL})")
     st.caption(

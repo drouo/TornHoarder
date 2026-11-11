@@ -60,7 +60,7 @@ def render_shop_scan(api_key: str) -> None:
         in_stock = df[df["In stock"] > 0]
         out = df[df["In stock"] == 0]
         money = ("Shop price", "Cheapest listing", "Profit / unit", "Profit if all stock", "Cash needed")
-        cfg = {c: st.column_config.NumberColumn(format="%,.0f") for c in money}
+        cfg = {c: st.column_config.NumberColumn(format="localized") for c in money}
         if in_stock.empty:
             st.info("Every profitable item is sold out right now.")
         else:

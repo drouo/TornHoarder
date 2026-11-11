@@ -72,8 +72,8 @@ def render_special_finds(ctx: dict) -> None:
             "Accuracy %": st.column_config.NumberColumn(format="%.2f", disabled=True),
             "Armor": st.column_config.NumberColumn(format="%.2f", disabled=True),
             "Quality": st.column_config.NumberColumn(format="%.2f", disabled=True),
-            "Standard": st.column_config.NumberColumn(format="%,.0f", disabled=True),
-            "Copy price": st.column_config.NumberColumn(format="%,.0f", disabled=True),
+            "Standard": st.column_config.NumberColumn(format="localized", disabled=True),
+            "Copy price": st.column_config.NumberColumn(format="localized", disabled=True),
             "+Premium %": st.column_config.NumberColumn(format="%.1f", disabled=True),
         },
     )

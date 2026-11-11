@@ -104,6 +104,6 @@ def render_loadout(equipment: Optional[list[dict]], values: Optional[dict] = Non
             hide_index=True,
             column_config={
                 "Image": st.column_config.ImageColumn("", width="small"),
-                "Worth today": st.column_config.NumberColumn(format="%,.0f"),
+                "Worth today": st.column_config.NumberColumn(format="localized"),
             },
         )

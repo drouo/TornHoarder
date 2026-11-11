@@ -149,6 +149,16 @@ When exchanging wins, the pieces of your complete sets are held out of the sell 
 
 Every Run adds one row per priced item to `data/price_history.csv`: time, item, category, floor/fast/fair/greedy prices, number of listings, units listed, your quantity and Torn's reference price. Items you own and items you have listed are always recorded. **Track price history for** (next to Sell categories) adds every item in the chosen categories, owned or not, at one extra market call each. View the rows under **Diagnostics → Price history**, or open the CSV in a spreadsheet.
 
+## Profile and loadout
+
+With a saved API key, the top of the app shows your profile card: avatar, name, level, rank, status, life/energy/nerve/happy bars, and your wallet, banked cash, points and networth. It's read from `user/profile`, `user/bars` and `user/money` when the page loads, at most once a minute. **Loadout** lists everything equipped (`user/equipment`) with its rolls, quality and bonuses; after a **Run**, each piece also shows what that exact copy is worth on today's market. The Sell plan tab adds your wallet to the plan's estimated proceeds.
+
+## Shop flips
+
+**Shop flips → Scan shops** checks every city shop's current stock (`torn/cityshops`) against live market listings, about 110 API calls. It lists what resells at a profit: $1 under the cheapest listing, after the 5% tax, minus the shop price. **Worth buying** caps the quantity at how many are listed for sale now, roughly what the market can take without sinking the price, and items are ranked by the profit on that many. Profitable items that are sold out are listed separately. Each completed scan logs shop stock to `data/cityshop_stock.csv` so restock times can be learned. Buying is your click on the shop page.
+
+Money is shown short throughout the app ($950, $1.2k, $15.6m, $2.95b); quantities stay exact.
+
 ## App tabs
 
 | Tab | Contents |
@@ -164,7 +174,7 @@ Every Run adds one row per priced item to `data/price_history.csv`: time, item, 
 | | |
 |---|---|
 | **Key access level** | **Limited**: inventory pulls need `user → inventory`, and your listings need a Limited key. Market and item lookups work with any key. |
-| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `user/itemmarket`, `market/{id}/itemmarket`, `market/pointsmarket`, `torn/items`, `torn/organizedcrimes`, `torn/museum`. All read-only. |
+| **What it calls** | `user/inventory`, `torn/{uid}?selections=itemdetails`, `user/itemmarket`, `market/{id}/itemmarket`, `market/pointsmarket`, `torn/items`, `torn/organizedcrimes`, `torn/museum`, `torn/cityshops`, `user/profile`, `user/equipment`, `user/bars`, `user/money`. All read-only. |
 | **Key storage** | Only on your PC, in `~/.tma_config.json`, and only if **Remember API key** is ticked. |
 | **Data sharing** | None. Requests go straight from your PC to `api.torn.com`. The userscript talks only to Torn and to this app on `127.0.0.1` (your own machine). |
 | **Purpose** | Pricing and selling your own items. |
@@ -197,6 +207,9 @@ TornHoarder/
 │     ├─ shops.py            # city-shop routing + learned shop buy lists
 │     ├─ crime_items.py      # OC requirements + crime-item detection
 │     ├─ museum.py           # museum sets: exchange vs sell
+│     ├─ profile.py          # profile, loadout, bars, money
+│     ├─ shop_flips.py       # city-shop stock vs market resale
+│     ├─ fmt.py              # short money formatting
 │     ├─ my_listings.py      # your active listings vs the market
 │     ├─ price_history.py    # one CSV row per item per run
 │     ├─ catalog.py          # torn/items dictionary + profiles, auto-refresh
@@ -209,7 +222,8 @@ TornHoarder/
 ├─ data/
 │  ├─ torn_item_dictionary.csv
 │  └─ torn_item_profiles.json  # (generated, git-ignored: tornhoarder.user.js, shop_buys.json,
-│                              #  oc_items.json, uid_stats.json, museum_sets.json, price_history.csv)
+│                              #  oc_items.json, uid_stats.json, museum_sets.json, price_history.csv,
+│                              #  cityshop_stock.csv)
 ├─ tools/
 │  ├─ server.ps1             # start/stop the app on Windows
 │  ├─ update_server.py       # serve the script without the app running

@@ -186,6 +186,12 @@ class CrimeHintTest(unittest.TestCase):
         self.assertFalse(crime_hint("A very simple virus. Used to plant a virus in Crimes 1.0."))
         self.assertFalse(crime_hint("The most famous cow of Torn, punisher of the scammer."))
 
+    def test_cemetery_key_keeps_one_unless_you_say_otherwise(self):
+        key = {"id": 853, "type": "Tool"}
+        self.assertEqual(reserve_for(853, key, "Tool", RULES)[0], 1)
+        self.assertIn("Cemetery Key", reserve_for(853, key, "Tool", RULES)[1])
+        self.assertEqual(reserve_for(853, key, "Tool", RULES, override=0)[0], 0)
+
     def test_unlock_and_effect_wording_is_a_crime_item(self):
         window_breaker = "Unlocks additional outcomes for certain targets in Burglary."
         self.assertTrue(crime_hint("A favorite tool among burglars.", window_breaker))

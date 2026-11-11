@@ -26,6 +26,12 @@ from .http_client import BASE_URL, get_json_with_retry
 
 MAX_AGE_S = 24 * 3600
 
+# Reusable crime tools Torn's text doesn't mark as such (no crime named in the
+# description or effect), so neither check above finds them. One is enough.
+MANUAL_CRIME_TOOLS = {
+    853: "Cemetery Key: unlocks searching the cemetery",
+}
+
 _CRIME_WORDS = (
     r"crimes?|disposal|forgery|burglary|scamming|cracking|bootlegging|graffiti|shoplifting|"
     r"pickpocketing|card skimming|skimming|hustling|arson|counterfeiting|search for cash"

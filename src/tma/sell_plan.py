@@ -23,6 +23,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Optional
 
+from .crime_items import MANUAL_CRIME_TOOLS
 from .fmt import money
 
 # Torn item market sales tax: 5% of the sale price since 2025-06-22
@@ -116,10 +117,13 @@ def reserve_for(
     """How many of an item to keep, and why. Your per-item number wins; otherwise:
     crime items (Organized Crime requirements, or items whose effect says a crime uses them)
     are all kept when keep_all_crime_items is on, else kept up to their per-kind numbers;
-    keep-one categories (e.g. one of every Clothing item) keep 1."""
+    keep-one categories (e.g. one of every Clothing item) keep 1; hand-listed crime
+    tools (MANUAL_CRIME_TOOLS) keep 1."""
     if override is not None:
         return max(int(override), 0), "your choice"
     keep, why = 0, ""
+    if int(item_id) in MANUAL_CRIME_TOOLS:
+        keep, why = 1, f"crime tool ({MANUAL_CRIME_TOOLS[int(item_id)]})"
     oc = (oc_items or {}).get(str(item_id))
     if rules.keep_all_crime_items and (oc or (profile or {}).get("crime_hint")):
         crimes = (oc or {}).get("crimes") or []

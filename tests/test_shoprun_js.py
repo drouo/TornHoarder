@@ -21,7 +21,8 @@ HARNESS = r"""
 const fs = require("fs");
 const made = [];
 function el() {
-  const e = { style: {}, kids: [], textContent: "", appendChild(k) { this.kids.push(k); }, addEventListener(t, f) { this["on" + t] = f; } };
+  const e = { style: {}, kids: [], textContent: "", appendChild(k) { this.kids.push(k); }, addEventListener(t, f) { this["on" + t] = f; },
+           setAttribute(k, v) { this["attr:" + k] = v; }, getAttribute(k) { return this["attr:" + k] || null; } };
   made.push(e);
   return e;
 }

@@ -46,16 +46,30 @@ TEMPLATE = """\
         return "$" + Math.round(n).toLocaleString("en-US");
     }
 
+    // Which extension runs this copy, e.g. "Tampermonkey 5.3.3" (BETA builds
+    // have their own version numbers), so duplicates can be found and removed.
+    var HANDLER = (typeof GM_info !== "undefined")
+        ? ((GM_info.scriptHandler || "userscript manager") + (GM_info.version ? " " + GM_info.version : ""))
+        : "unknown manager";
+
+    function labelCopy(button) {
+        button.setAttribute("data-th-copy", "v" + VER + " in " + HANDLER);
+    }
+
     // Several installed copies each draw their own button in the same spot, so
-    // the one on top may be stale. Warn from inside the panel.
+    // the one on top may be stale. Warn from inside the panel, naming each copy.
     function copiesWarning(panelEl, buttonId) {
-        var n = document.querySelectorAll("#" + buttonId).length;
-        if (n < 2) {
+        var buttons = document.querySelectorAll("#" + buttonId);
+        if (buttons.length < 2) {
             return;
         }
+        var copies = Array.prototype.map.call(buttons, function (b) {
+            return b.getAttribute("data-th-copy") || "an old copy (before v1.3.8)";
+        });
         var div = document.createElement("div");
-        div.textContent = n + " copies of TornHoarder are running on this page, and the button on top may be an old one. " +
-            "In the Tampermonkey dashboard keep only one TornHoarder script (v" + VER + ") and delete the rest.";
+        div.textContent = buttons.length + " copies of TornHoarder are running on this page: " + copies.join("; ") + ". " +
+            "Each userscript extension (Tampermonkey, Tampermonkey BETA, Violentmonkey…) runs its own copy. " +
+            "Keep TornHoarder in one extension only and delete it from the others.";
         div.style.cssText = "color:#ff8a80;font-weight:bold;margin-bottom:6px;";
         panelEl.appendChild(div);
     }
@@ -263,6 +277,7 @@ TEMPLATE = """\
         var btn = document.createElement("button");
         btn.id = "th-list-btn";
         btn.type = "button";
+        labelCopy(btn);
         btn.style.cssText =
             "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
             "min-width:360px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
@@ -747,7 +762,7 @@ TEMPLATE = """\
             }
         });
 
-        window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups, selectLinks: selectLinks };
+        window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups, selectLinks: selectLinks, copiesWarning: copiesWarning };
         render();
         setInterval(render, 700);
         console.log("[TornHoarder] list mode v" + VER + ": " + plannedLines().length + " item(s) planned");
@@ -794,6 +809,7 @@ TEMPLATE = """\
         var btn = document.createElement("button");
         btn.id = "tma-shop-btn";
         btn.type = "button";
+        labelCopy(btn);
         btn.style.cssText =
             "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
             "min-width:340px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +

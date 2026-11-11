@@ -20,7 +20,7 @@ NODE = shutil.which("node")
 
 HARNESS = r"""
 const fs = require("fs");
-const el = () => ({ style: {}, appendChild() {}, addEventListener() {}, contains() { return false; }, set textContent(v) {} });
+const el = () => ({ style: {}, appendChild() {}, addEventListener() {}, setAttribute() {}, contains() { return false; }, set textContent(v) {} });
 global.window = { scrollTo() {}, scrollBy() {}, innerHeight: 800, scrollY: 0 };
 window.top = window;
 global.location = { pathname: "/page.php", search: "?sid=ItemMarket", hash: "#/addListing" };
@@ -53,7 +53,20 @@ function selectCase(c) {
   });
   return { labels: links.map(l => l.textContent), states, redraws };
 }
-const out = cases.map(c => c.select ? selectCase(c) : c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned, c.shopHeld));
+function copiesCase(c) {
+  const kids = [];
+  const panel = { appendChild(d) { kids.push(d); } };
+  const buttons = c.labels.map(l => ({ getAttribute: () => l }));
+  const origAll = document.querySelectorAll;
+  const origCreate = document.createElement;
+  document.querySelectorAll = sel => (sel === "#th-list-btn" ? buttons : []);
+  document.createElement = () => ({ style: {} });
+  L.copiesWarning(panel, "th-list-btn");
+  document.querySelectorAll = origAll;
+  document.createElement = origCreate;
+  return { text: kids.length ? kids[0].textContent : null };
+}
+const out = cases.map(c => c.copies ? copiesCase(c) : c.select ? selectCase(c) : c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned, c.shopHeld));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -161,6 +174,16 @@ class ListModeDecisionsTest(unittest.TestCase):
         self.assertEqual(r["labels"], ["Select all", "Deselect all"])
         self.assertEqual(r["states"], [["180", "8", "999"], []])
         self.assertEqual(r["redraws"], 2)
+
+
+    def test_copies_warning_names_each_copy(self):
+        one, two = self.run_cases([
+            {"copies": True, "labels": ["v1.3.8 in Tampermonkey 5.3.3"]},
+            {"copies": True, "labels": ["v1.3.8 in Tampermonkey 5.3.3", None, "v1.3.8 in Tampermonkey 5.4.6224"]},
+        ])
+        self.assertIsNone(one["text"])
+        self.assertIn("3 copies of TornHoarder are running on this page: v1.3.8 in Tampermonkey 5.3.3; "
+                      "an old copy (before v1.3.8); v1.3.8 in Tampermonkey 5.4.6224.", two["text"])
 
 
 if __name__ == "__main__":

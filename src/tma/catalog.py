@@ -74,7 +74,7 @@ def build_profiles(items: list[dict]) -> dict[str, dict]:
             "stats": stats,
             "coverage": details.get("coverage"),
             # Regular (non-OC) crimes say so in the item's effect/description.
-            "crime_hint": crime_hint(" ".join(filter(None, [it.get("description"), it.get("effect")]))),
+            "crime_hint": crime_hint(it.get("description"), it.get("effect")),
         }
     return profiles
 

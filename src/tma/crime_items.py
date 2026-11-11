@@ -6,9 +6,10 @@ whether the OC consumes it (ID Badge, Zip Ties, C4) or you keep it
 (Lockpicks, Jemmy, Wire Cutters). Cached in data/oc_items.json for a day.
 
 Regular crimes have no such list; the only signal is an item's own
-description ("Required for the disposal of firearms in Disposal",
-"Improves Disposal crime exp"). `crime_hint()` flags those, ignoring
-references to the retired Crimes 1.0.
+description and effect ("Required for the disposal of firearms in Disposal",
+"Improves Disposal crime exp", "Unlocks additional outcomes ... in Burglary",
+"Ignites a fire in Arson"). `crime_hint()` flags those, ignoring references
+to the retired Crimes 1.0.
 """
 
 from __future__ import annotations
@@ -30,15 +31,20 @@ _CRIME_WORDS = (
     r"pickpocketing|card skimming|skimming|hustling|arson|counterfeiting|search for cash"
 )
 _HINT = re.compile(
-    rf"\b(required|used|needed|useful)\b[^.]{{0,80}}\b({_CRIME_WORDS})\b|\bimproves\b[^.]{{0,60}}\bcrime",
+    rf"\b(required|used|needed|useful|unlocks?|enables?|allows?|increases?|boosts?|grants?)\b[^.]{{0,80}}"
+    rf"\b({_CRIME_WORDS})\b|\bimproves\b[^.]{{0,60}}\bcrime",
     re.IGNORECASE,
 )
 _RETIRED = re.compile(r"crimes 1\.0", re.IGNORECASE)
+# An item's effect line naming a crime ("... in Arson.") is always about using it there.
+_EFFECT_IN_CRIME = re.compile(rf"\bin ({_CRIME_WORDS})\b", re.IGNORECASE)
 
 
-def crime_hint(description: Optional[str]) -> bool:
-    """True when an item's description says it's used for a (current) crime."""
-    text = description or ""
+def crime_hint(description: Optional[str], effect: Optional[str] = None) -> bool:
+    """True when an item's description or effect says it's used for a (current) crime."""
+    if effect and _EFFECT_IN_CRIME.search(_RETIRED.sub("", effect)):
+        return True
+    text = " ".join(filter(None, [description, effect]))
     return bool(_HINT.search(_RETIRED.sub("", text))) and not (
         _RETIRED.search(text) and not re.search(r"crimes 2|organi[sz]ed", text, re.IGNORECASE)
     )

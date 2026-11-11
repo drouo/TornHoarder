@@ -186,6 +186,14 @@ class CrimeHintTest(unittest.TestCase):
         self.assertFalse(crime_hint("A very simple virus. Used to plant a virus in Crimes 1.0."))
         self.assertFalse(crime_hint("The most famous cow of Torn, punisher of the scammer."))
 
+    def test_unlock_and_effect_wording_is_a_crime_item(self):
+        window_breaker = "Unlocks additional outcomes for certain targets in Burglary."
+        self.assertTrue(crime_hint("A favorite tool among burglars.", window_breaker))
+        self.assertTrue(crime_hint(None, "Ignites a fire in Arson."))
+        self.assertTrue(crime_hint(None, "Increases crime skill & crime experience gain by 25% for 31 days."))
+        self.assertFalse(crime_hint("Used to plant a virus in Crimes 1.0.", None))
+        self.assertFalse(crime_hint("A plushie.", "Can be exchanged at the museum."))
+
     def test_parse_organized_crimes(self):
         data = {"organizedcrimes": [
             {"name": "Pet Project", "difficulty": 1, "slots": [

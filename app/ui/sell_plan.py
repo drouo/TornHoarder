@@ -382,6 +382,7 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
         st.rerun()
 
     _render_totals(edited)
+    _render_money(an.get("money"), float(edited.apply(_row_proceeds, axis=1).sum()))
     shop_run = build_shop_run(shop_rows(edited), profiles, known)
     _render_shop_run(shop_run)
     _render_market_run(edited)
@@ -550,3 +551,17 @@ def _render_my_listings(rows: list[dict]) -> None:
         "with copies of the same quality or better. **New price** is $1 under the cheapest other listing, never under "
         "what a shop pays or half Torn's reference price; when you're cheapest by a wide margin it's what you could ask."
     )
+
+
+def _render_money(money: Optional[dict], proceeds: float) -> None:
+    if not money or not money.get("cash"):
+        return
+    wallet = money["cash"].get("wallet", 0.0)
+    text = (
+        f"Wallet now ${wallet:,.0f} · this plan adds about ${proceeds:,.0f} → **${wallet + proceeds:,.0f}** "
+        f"(everything: ${money['cash_total'] + proceeds:,.0f} cash"
+        + (f", networth ${money['networth']:,.0f} today" if money.get("networth") else "")
+        + ")."
+    )
+    # Escaped: two bare $ in one markdown line render as a math formula.
+    st.caption(text.replace("$", "\\$"))

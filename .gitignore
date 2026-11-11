@@ -30,3 +30,6 @@ data/price_history.csv
 
 # Museum sets (torn/museum), refreshed daily
 data/museum_sets.json
+
+# City shop stock, logged by each Scan shops
+data/cityshop_stock.csv

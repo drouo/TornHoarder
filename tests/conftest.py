@@ -52,6 +52,13 @@ def no_catalog_refresh(monkeypatch):
 
     monkeypatch.setattr(my_listings, "fetch_my_listings", lambda *a, **k: ([], None))
 
+    from tma import profile
+
+    monkeypatch.setattr(
+        profile, "fetch_profile_bundle",
+        lambda *a, **k: {"profile": None, "equipment": None, "bars": None, "money": None, "errors": []},
+    )
+
 
 @pytest.fixture(autouse=True)
 def isolate_autofill_output(tmp_path, monkeypatch):
@@ -84,3 +91,4 @@ def isolate_stats_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "UID_STATS_PATH", tmp_path / "uid_stats.json")
     monkeypatch.setattr(paths, "PRICE_HISTORY_PATH", tmp_path / "price_history.csv")
     monkeypatch.setattr(paths, "MUSEUM_PATH", tmp_path / "museum_sets.json")
+    monkeypatch.setattr(paths, "CITYSHOP_STOCK_PATH", tmp_path / "cityshop_stock.csv")

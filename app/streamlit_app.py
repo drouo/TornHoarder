@@ -20,10 +20,12 @@ from app.paths import (
     UID_STATS_PATH,
 )
 from app.ui import autofill_export
+from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
+from app.ui.shop_scan import render_shop_scan
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
-from tma import museum, my_listings
+from tma import museum, my_listings, profile
 from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
@@ -68,6 +70,12 @@ def _numeric_market(df_market: pd.DataFrame) -> pd.DataFrame:
         if c in df_market.columns:
             df_market[c] = pd.to_numeric(df_market[c], errors="coerce")
     return df_market
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def profile_bundle(api_key: str) -> dict:
+    """Profile, loadout, bars and money; re-read at most once a minute."""
+    return profile.fetch_profile_bundle(session_for_requests(), api_key)
 
 
 @st.cache_data
@@ -117,6 +125,13 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+if st.session_state["api_key"]:
+    _bundle = profile_bundle(st.session_state["api_key"])
+    _an = st.session_state.get("analysis") or {}
+    render_profile_card(_bundle, (_an.get("museum") or {}).get("point_price"))
+    render_loadout(_bundle.get("equipment"), _an.get("loadout_values"))
+render_shop_scan(st.session_state["api_key"])
 
 with st.expander("How it works"):
     st.markdown(
@@ -525,11 +540,14 @@ if submitted:
         if listed_err:
             st.caption(f"Couldn't read your Item Market listings ({listed_err}).")
     listed_ids = {int((l.get("item") or {}).get("id")) for l in listed if (l.get("item") or {}).get("id")}
+    # Equipped gear is never pulled with the inventory, so it's priced as an extra too.
+    equipment = (profile_bundle(api_key).get("equipment") or []) if source == "API inventory" else []
+    equipped_ids = {int(e["id"]) for e in equipment if e.get("id")}
     # Tracked items you don't own ride along in the same market fetch, for
     # price history only; they never reach the sell plan.
     extra_ids = sorted(
         set(tracked_item_ids(load_profiles(PROFILES_PATH), history_categories, exclude=per_id_qty))
-        | (listed_ids - set(per_id_qty))
+        | ((listed_ids | equipped_ids) - set(per_id_qty))
     )
     unique_ids = list(per_id_qty) + extra_ids
     n_uniq = len(unique_ids)
@@ -626,7 +644,14 @@ if submitted:
                 df_hist = pd.concat([df_summary, build_summary_from_enriched(enrich_all_items(extra_long))], ignore_index=True)
                 df_long_hist = pd.concat([df_long, extra_long], ignore_index=True)
         n_hist = append_history(PRICE_HISTORY_PATH, history_rows(df_hist, df_long_hist, profiles, time.time()))
-        st.caption(f"Price history: {n_hist} rows added ({len(extra_rows)} tracked items you don't own).")
+        st.caption(f"Price history: {n_hist} rows added ({len(extra_rows)} of them items you don't hold).")
+        hist_by_id = {int(r["item_id"]): r for r in df_hist.to_dict("records")}
+        loadout_values = {
+            str(e.get("uid") or e["id"]): profile.equipped_value(
+                e, hist_by_id.get(int(e["id"])), (profiles.get(str(e["id"])) or {}).get("market_price")
+            )
+            for e in equipment
+        }
 
         known_shops = load_shop_knowledge(SHOP_BUYS_PATH)
         st.session_state["analysis"] = {
@@ -640,6 +665,8 @@ if submitted:
             "entries": entries,
             "uid_stats": uid_stats if source in ("API inventory", "Single item") else {},
             "museum": {"sets": museum.load_museum(MUSEUM_PATH), "point_price": point_price},
+            "loadout_values": loadout_values,
+            "money": profile.total_money(profile_bundle(api_key).get("money"), point_price) if source == "API inventory" else None,
             "my_listings": [
                 my_listings.review_listing(
                     l,

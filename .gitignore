@@ -24,3 +24,6 @@ data/oc_items.json
 
 # Your weapon/armor copies' stats, cached by uid (they never change)
 data/uid_stats.json
+
+# One row per priced item per run
+data/price_history.csv

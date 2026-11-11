@@ -9,12 +9,13 @@ import streamlit as st
 
 from tma.inventory import load_stats_cache
 from tma.item_stats import load_profiles
+from tma.price_history import load_history
 
 from .. import paths
 
 _VIEWS = (
     "Parsed items", "Unmatched items", "Market data (wide)", "Market data (long)", "Pricing diagnostics",
-    "Copy stats cache",
+    "Copy stats cache", "Price history",
 )
 
 
@@ -68,5 +69,13 @@ def render_diagnostics(an: dict, df_summary: pd.DataFrame) -> None:
             "*First seen* is when TornHoarder first read the copy (blank: cached before tracking started)."
         )
         st.dataframe(df, width="stretch", hide_index=True)
+    elif view == "Price history":
+        hist = load_history(paths.PRICE_HISTORY_PATH)
+        runs = hist["time"].nunique() if not hist.empty else 0
+        st.caption(
+            f"{len(hist)} rows from {runs} run(s) in `data/price_history.csv`, newest first. Choose extra "
+            "categories under **Track price history for** above the Run button."
+        )
+        st.dataframe(hist.iloc[::-1], width="stretch", hide_index=True)
     else:
         st.dataframe(df_summary, width="stretch", hide_index=True)

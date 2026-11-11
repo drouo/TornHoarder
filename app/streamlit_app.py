@@ -14,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.paths import DICT_PATH, OC_ITEMS_PATH, PROFILES_PATH, UID_STATS_PATH
+from app.paths import DICT_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, UID_STATS_PATH
 from app.ui import autofill_export
 from app.ui.results import render_results
 from tma import __version__
@@ -33,6 +33,7 @@ from tma.inventory import (
     CATEGORY_LABELS,
 )
 from tma.inventory_matcher import load_dictionary, match_inventory
+from tma.price_history import append_history, history_rows, tracked_item_ids
 from tma.market_enrichment import wide_to_long, enrich_all_items, build_summary_from_enriched
 from tma.market_fetch import fetch_all_item_markets
 from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
@@ -40,6 +41,17 @@ from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
 MAX_WORKERS = 5
 RATE_LIMIT_PER_MIN = 90
 MARKET_PHASE_TIMEOUT_S = 1200.0
+
+
+def _numeric_market(df_market: pd.DataFrame) -> pd.DataFrame:
+    for i in range(1, 101):
+        for col in (f"price_{i}", f"amount_{i}", f"quality_{i}", f"damage_{i}", f"accuracy_{i}", f"armor_{i}"):
+            if col in df_market.columns:
+                df_market[col] = pd.to_numeric(df_market[col], errors="coerce")
+    for c in ("average_price", "my_quantity", "item_id"):
+        if c in df_market.columns:
+            df_market[c] = pd.to_numeric(df_market[c], errors="coerce")
+    return df_market
 
 
 @st.cache_data
@@ -201,10 +213,24 @@ if source == "API inventory":
         help="Only these categories are pulled and priced; everything else is never listed. "
         "Equipped items are always skipped. Remembered on this computer.",
     )
-    if tuple(chosen) != rules_now.sell_categories:
-        save_sell_prefs(replace(rules_now, sell_categories=tuple(chosen)).to_dict(), saved_overrides)
+    tracked = st.multiselect(
+        "Track price history for",
+        INVENTORY_CATEGORIES,
+        default=[c for c in rules_now.history_categories if c in INVENTORY_CATEGORIES],
+        format_func=lambda c: CATEGORY_LABELS.get(c, c),
+        key="history_categories",
+        help="Every run adds one row per priced item to data/price_history.csv. Items you own are always "
+        "recorded; these categories add every item in them, owned or not (one extra market call each).",
+    )
+    if tuple(chosen) != rules_now.sell_categories or tuple(tracked) != rules_now.history_categories:
+        save_sell_prefs(
+            replace(rules_now, sell_categories=tuple(chosen), history_categories=tuple(tracked)).to_dict(),
+            saved_overrides,
+        )
     pull_categories: tuple[str, ...] | None = tuple(chosen)
+    history_categories: tuple[str, ...] = tuple(tracked)
 elif source == "Paste items":
+    history_categories = ()
     raw = st.text_area(
         "Paste your items",
         height=220,
@@ -218,6 +244,7 @@ else:
     )
     raw = None
     pull_categories = None
+    history_categories = ()
     single_query = st.text_input(
         "Item name or ID",
         key="single_query",
@@ -461,7 +488,10 @@ if submitted:
     per_id_qty: dict[int, int] = {}
     for iid, qty in agg:
         per_id_qty[iid] = per_id_qty.get(iid, 0) + qty
-    unique_ids = list(per_id_qty)
+    # Tracked items you don't own ride along in the same market fetch, for
+    # price history only; they never reach the sell plan.
+    extra_ids = tracked_item_ids(load_profiles(PROFILES_PATH), history_categories, exclude=per_id_qty)
+    unique_ids = list(per_id_qty) + extra_ids
     n_uniq = len(unique_ids)
 
     run_box.update(label=f"Step 3/4 · pricing {n_uniq} distinct items…", state="running")
@@ -484,7 +514,7 @@ if submitted:
         bucket,
         api_key,
         unique_ids,
-        per_id_qty,
+        {**per_id_qty, **{iid: 0 for iid in extra_ids}},
         max_workers=MAX_WORKERS,
         on_progress=_on_market_progress,
         deadline_s=MARKET_PHASE_TIMEOUT_S,
@@ -519,22 +549,7 @@ if submitted:
         run_box.update(label="Market phase failed", state="error")
         st.error("Every item lookup failed — no market data was retrieved. See the errors above.")
         st.stop()
-    df_market = pd.DataFrame(rows)
-
-    for i in range(1, 101):
-        pcol = f"price_{i}"
-        acol = f"amount_{i}"
-        if pcol in df_market.columns:
-            df_market[pcol] = pd.to_numeric(df_market[pcol], errors="coerce")
-        if acol in df_market.columns:
-            df_market[acol] = pd.to_numeric(df_market[acol], errors="coerce")
-        for scol in (f"quality_{i}", f"damage_{i}", f"accuracy_{i}", f"armor_{i}"):
-            if scol in df_market.columns:
-                df_market[scol] = pd.to_numeric(df_market[scol], errors="coerce")
-
-    for c in ("average_price", "my_quantity", "item_id"):
-        if c in df_market.columns:
-            df_market[c] = pd.to_numeric(df_market[c], errors="coerce")
+    df_market = _numeric_market(pd.DataFrame(rows))
 
     run_box.update(label="Step 4/4 · computing price suggestions…", state="running")
     with st.spinner("Computing price suggestions…"):
@@ -561,6 +576,17 @@ if submitted:
         df_summary["stat_tier"] = [c[0] for c in stat_cols]
         df_summary["market_price_ref"] = [c[1] for c in stat_cols]
         df_summary["stat_implied"] = [c[2] for c in stat_cols]
+
+        df_hist = df_summary
+        extra_rows = [dict(per_id_rows[i], my_quantity=0) for i in extra_ids if i in per_id_rows and "error" not in per_id_rows[i]]
+        df_long_hist = df_long
+        if extra_rows:
+            extra_long = wide_to_long(_numeric_market(pd.DataFrame(extra_rows)))
+            if not extra_long.empty:
+                df_hist = pd.concat([df_summary, build_summary_from_enriched(enrich_all_items(extra_long))], ignore_index=True)
+                df_long_hist = pd.concat([df_long, extra_long], ignore_index=True)
+        n_hist = append_history(PRICE_HISTORY_PATH, history_rows(df_hist, df_long_hist, profiles, time.time()))
+        st.caption(f"Price history: {n_hist} rows added ({len(extra_rows)} tracked items you don't own).")
 
         st.session_state["analysis"] = {
             "df_summary": df_summary,

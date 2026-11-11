@@ -73,3 +73,4 @@ def isolate_stats_cache(tmp_path, monkeypatch):
     from app import paths
 
     monkeypatch.setattr(paths, "UID_STATS_PATH", tmp_path / "uid_stats.json")
+    monkeypatch.setattr(paths, "PRICE_HISTORY_PATH", tmp_path / "price_history.csv")

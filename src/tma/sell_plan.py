@@ -79,17 +79,21 @@ class SellRules:
     oc_tool_keep: int = 1
     oc_consumable_keep: int = 3
     crime_hint_keep: int = 1
+    # Price history: every item in these categories gets a row each run,
+    # owned or not (one extra market call per unowned item).
+    history_categories: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["sell_categories"] = list(self.sell_categories)
         d["keep_one_categories"] = list(self.keep_one_categories)
+        d["history_categories"] = list(self.history_categories)
         return d
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "SellRules":
         known = {k: v for k, v in (d or {}).items() if k in cls.__dataclass_fields__}
-        for key in ("sell_categories", "keep_one_categories"):
+        for key in ("sell_categories", "keep_one_categories", "history_categories"):
             if key in known:
                 known[key] = tuple(known[key])
         return cls(**known)

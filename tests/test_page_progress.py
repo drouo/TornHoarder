@@ -32,7 +32,9 @@ class PageProgressTest(unittest.TestCase):
         page.stage("market", 50, 100, "Pricing 50/100 · <Axe>")
         self.assertEqual(height(slot), 60.0)
         self.assertIn(">60%<", slot.html)
-        self.assertIn("Pricing 50/100 · &lt;Axe&gt;", slot.html)
+        self.assertIn("60% · Pricing 50/100 · &lt;Axe&gt;", slot.html)
+        # The big number rides the top of the fill.
+        self.assertIn("bottom:calc(60.00vh + 6px)", slot.html)
 
     def test_never_moves_backwards_and_clears(self):
         slot = FakeSlot()

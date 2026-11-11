@@ -1,5 +1,6 @@
 """Whole-page progress: the window fills from the bottom as a run goes, with a
-huge percentage behind the content and a status line at the bottom.
+big percentage in the right-hand margin riding the top of the fill, and a
+status line at the bottom.
 
 Drawn as a fixed overlay that ignores the mouse, so the page stays usable.
 Each stage of a run owns a slice of the bar (see STAGES) so the fill moves
@@ -29,10 +30,13 @@ _CSS = """
     border-top: 3px solid rgba(124,179,66,.9);
     box-shadow: 0 -10px 40px rgba(124,179,66,.35);
   }
+  /* In the empty margin right of the centered content, sitting on the fill line. */
   .th-fill-pct {
-    inset: 0; z-index: 999991; display: flex; align-items: center; justify-content: center;
-    font: 900 min(34vw, 46vh)/1 Arial, sans-serif; color: rgba(124,179,66,.16); letter-spacing: -0.04em;
+    right: 2.5vw; z-index: 999991;
+    font: 900 clamp(48px, calc((100vw - 900px) / 2.8), 200px)/0.9 Arial, sans-serif;
+    color: rgba(124,179,66,.6); letter-spacing: -0.04em; text-shadow: 0 0 24px rgba(124,179,66,.35);
   }
+  @media (max-width: 1100px) { .th-fill-pct { display: none; } }
   .th-fill-text {
     left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 999992; max-width: 92vw;
     padding: 10px 22px; border-radius: 999px; background: rgba(0,0,0,.72); color: #fff;
@@ -54,11 +58,14 @@ class PageProgress:
         # Never move backwards: stages report their own 0..1 and may restart.
         self.fraction = max(self.fraction, min(max(float(fraction), 0.0), 1.0))
         pct = self.fraction * 100.0
+        # The number rides the fill line, but stays on screen near the top.
+        rides = min(pct, 78.0)
+        status = f"{pct:.0f}%" + (f" · {text}" if text else "")
         self._slot.markdown(
             _CSS
             + f'<div class="th-fill" style="height:{pct:.2f}vh"></div>'
-            + f'<div class="th-fill-pct">{pct:.0f}%</div>'
-            + (f'<div class="th-fill-text">{escape(text)}</div>' if text else ""),
+            + f'<div class="th-fill-pct" style="bottom:calc({rides:.2f}vh + 6px)">{pct:.0f}%</div>'
+            + f'<div class="th-fill-text">{escape(status)}</div>',
             unsafe_allow_html=True,
         )
 

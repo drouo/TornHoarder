@@ -41,6 +41,14 @@ def _weapon_frame(n=30, trend=1.0, seed=0):
 
 
 class BuildStatPayloadTest(unittest.TestCase):
+    def test_band_prices_keep_their_own_quantities(self):
+        # One band, listed out of price order: $300 x1 then $100 x10. By units,
+        # the 25th percentile is $100; pairing sorted prices with unsorted
+        # quantities used to give $300.
+        df = _weapon_frame(n=2).assign(listing_quality=[10.0, 10.0], price=[300.0, 100.0], quantity=[1, 10])
+        (band,) = build_stat_payload(df)["points"]
+        self.assertEqual(band["fast"], 100.0)
+
     def test_weapon_payload(self):
         payload = build_stat_payload(_weapon_frame())
         self.assertEqual(payload["stat_type"], "Weapon")

@@ -344,17 +344,14 @@ def build_stat_payload(df_item: pd.DataFrame) -> dict:
     for bucket, grp in df_q.groupby("bucket"):
         if grp.empty:
             continue
-        fast = _weighted_quantile(
-            grp.sort_values("price")["price"].to_numpy(dtype=float),
-            grp["quantity"].to_numpy(dtype=float),
-            0.25,
-        )
+        # Prices and their quantities must be sorted together, or each price
+        # gets another listing's weight.
+        by_price = grp.sort_values("price")
+        prices = by_price["price"].to_numpy(dtype=float)
+        weights = by_price["quantity"].to_numpy(dtype=float)
+        fast = _weighted_quantile(prices, weights, 0.25)
         fair = _weighted_median_price(grp)
-        greedy = _weighted_quantile(
-            grp.sort_values("price")["price"].to_numpy(dtype=float),
-            grp["quantity"].to_numpy(dtype=float),
-            0.75,
-        )
+        greedy = _weighted_quantile(prices, weights, 0.75)
         points.append({"q": float(bucket), "n": int(len(grp)), "fast": fast, "fair": fair, "greedy": greedy})
     points.sort(key=lambda p: p["q"])
 

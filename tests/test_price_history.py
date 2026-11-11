@@ -38,7 +38,9 @@ class PriceHistoryUnitTest(unittest.TestCase):
         }])
         long = pd.DataFrame([{"item_id": 206, "quantity": 3}, {"item_id": 206, "quantity": 4}])
         rows = history_rows(summary, long, PROFILES, now=0.0)
-        self.assertEqual(rows[0]["time"], "1970-01-01T00:00:00")
+        from datetime import datetime
+
+        self.assertEqual(rows[0]["time"], datetime.fromtimestamp(0).strftime("%Y-%m-%dT%H:%M:%S"))
         self.assertEqual((rows[0]["category"], rows[0]["units_listed"], rows[0]["ref_price"]), ("Drug", 7, 800000.0))
         with TemporaryDirectory() as d:
             path = Path(d) / "h.csv"

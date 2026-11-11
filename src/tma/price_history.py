@@ -7,6 +7,7 @@ add every tradable item in them, owned or not, at one market call each.
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -34,7 +35,8 @@ def tracked_item_ids(profiles: dict, categories: Iterable[str], exclude: Iterabl
 
 def history_rows(df_summary: pd.DataFrame, df_long: pd.DataFrame, profiles: dict, now: float) -> list[dict]:
     units = df_long.groupby("item_id")["quantity"].sum() if not df_long.empty else pd.Series(dtype=float)
-    stamp = pd.to_datetime(now, unit="s").strftime("%Y-%m-%dT%H:%M:%S")
+    # Local time, as the person running the app reads it.
+    stamp = datetime.fromtimestamp(now).strftime("%Y-%m-%dT%H:%M:%S")
     rows = []
     for r in df_summary.to_dict("records"):
         iid = int(r["item_id"])

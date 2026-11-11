@@ -12,6 +12,7 @@ from typing import Optional
 
 import requests
 
+from .fmt import money
 from .http_client import BASE_URL, TokenBucket, get_json_with_retry
 from .sell_plan import price_guards
 
@@ -91,9 +92,9 @@ def review_listing(
     if best < price:
         target = best - 1
         if floor and target < floor:
-            row["Status"] = f"undercut by ${price - best:,.0f}; matching it would go under your floor ${floor:,.0f}"
+            row["Status"] = f"undercut by {money(price - best)}; matching it would go under your floor {money(floor)}"
         else:
-            row["Status"] = f"undercut by ${price - best:,.0f}"
+            row["Status"] = f"undercut by {money(price - best)}"
             row["New price"] = target
     elif best == price:
         row["Status"] = "tied for cheapest"
@@ -102,7 +103,7 @@ def review_listing(
     else:
         gap = (best - price) / best * 100.0
         if gap > GAP_PCT:
-            row["Status"] = f"cheapest by {gap:.0f}%: could ask up to ${best - 1:,.0f}"
+            row["Status"] = f"cheapest by {gap:.0f}%: could ask up to {money(best - 1)}"
             row["New price"] = best - 1
         else:
             row["Status"] = "cheapest"

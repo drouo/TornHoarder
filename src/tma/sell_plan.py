@@ -23,6 +23,8 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Optional
 
+from .fmt import money
+
 # Torn item market sales tax: 5% of the sale price since 2025-06-22
 # (https://wiki.torn.com/wiki/Item_Market). Anonymous listings cost more.
 MARKET_FEE = 0.05
@@ -156,12 +158,12 @@ def auto_plan(
         return "top", f"high-roll copy (quality {quality:.0f})"
     if unit_value >= rules.competitive_min_unit:
         if num_listings is not None and num_listings < rules.thin_market_listings:
-            return "top", f"worth ${unit_value:,.0f} with only {num_listings} listings"
-        return "competitive", f"worth ${unit_value:,.0f} each"
+            return "top", f"worth {money(unit_value)} with only {num_listings} listings"
+        return "competitive", f"worth {money(unit_value)} each"
     stack = unit_value * qty
     if stack >= rules.competitive_min_stack:
-        return "competitive", f"stack worth ${stack:,.0f}"
-    return "dump", f"cheap (${unit_value:,.0f} each)"
+        return "competitive", f"stack worth {money(stack)}"
+    return "dump", f"cheap ({money(unit_value)} each)"
 
 
 def plan_price(plan: str, fast: Optional[float], fair: Optional[float], greedy: Optional[float], rules: SellRules) -> Optional[int]:
@@ -220,7 +222,7 @@ def decide(
     price = plan_price(plan, fast, fair, greedy, rules) if plan != "shop" else None
     if auto and plan in ("dump", "competitive") and shop is not None:
         if price is None or shop >= price * (1.0 - MARKET_FEE):
-            plan, reason = "shop", f"shop pays ${shop:,.0f} vs ${price or 0:,.0f} on market less {MARKET_FEE:.0%} tax"
+            plan, reason = "shop", f"shop pays {money(shop)} vs {money(price or 0)} on market less {MARKET_FEE:.0%} tax"
 
     if plan == "shop":
         if shop is None:
@@ -232,7 +234,7 @@ def decide(
         # Listing below what a shop pays (net of tax) is strictly worse than the shop.
         price = max(price, shop_min)
     if price is not None and ref_min and price < ref_min:
-        warn = f"${price:,} is under {REF_GUARD:.0%} of Torn's ${ref_price:,.0f} reference"
+        warn = f"{money(price)} is under {REF_GUARD:.0%} of Torn's {money(ref_price)} reference"
         if auto:
             return Decision("keep", f"⚠ check the market: {warn}", None, 0.0, auto)
         reason = f"{reason} — ⚠ {warn}"

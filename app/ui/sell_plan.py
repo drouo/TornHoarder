@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from tma.config import load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
 from tma.crime_items import load_oc_items
+from tma.fmt import money
 from tma.inventory import inventory_category_for_profile
 from tma.museum import evaluate_sets, museum_holds
 from tma.sell_plan import (
@@ -363,12 +364,12 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
             "Qty": st.column_config.NumberColumn(format="localized", disabled=True),
             "Keeping": st.column_config.NumberColumn(min_value=0, step=1, format="localized", help="How many you keep. Type a number to set it by hand."),
             "Selling": st.column_config.NumberColumn(format="localized", disabled=True),
-            "List price": st.column_config.NumberColumn(min_value=1, step=1, format="localized"),
-            "Est. proceeds": st.column_config.NumberColumn(format="localized", disabled=True),
+            "List price": st.column_config.NumberColumn(min_value=1, step=1, format="compact"),
+            "Est. proceeds": st.column_config.NumberColumn(format="compact", disabled=True),
             "Why": st.column_config.Column(disabled=True),
-            "Floor": st.column_config.NumberColumn(format="localized", disabled=True),
-            "Fair": st.column_config.NumberColumn(format="localized", disabled=True),
-            "Shop pays": st.column_config.NumberColumn(format="localized", disabled=True),
+            "Floor": st.column_config.NumberColumn(format="compact", disabled=True),
+            "Fair": st.column_config.NumberColumn(format="compact", disabled=True),
+            "Shop pays": st.column_config.NumberColumn(format="compact", disabled=True),
         },
     )
 
@@ -436,7 +437,7 @@ def _render_totals(edited: pd.DataFrame) -> None:
     for col, plan in zip(cols, PLANS):
         label = PLAN_LABELS[plan]
         n, total = (int(by_plan.loc[label, "count"]), by_plan.loc[label, "sum"]) if label in by_plan.index else (0, 0.0)
-        col.metric(f"{label} ({n})", f"${total:,.0f}" if plan != "keep" else "—")
+        col.metric(f"{label} ({n})", f"{money(total)}" if plan != "keep" else "—")
 
 
 def _render_shop_run(shop_run: dict) -> None:
@@ -446,12 +447,12 @@ def _render_shop_run(shop_run: dict) -> None:
         return
     total = sum(s["payout"] for s in route)
     n = sum(s["items"] for s in route)
-    st.markdown(f"**Shop run**: {n:,} items · ${total:,.0f} across {len(route)} shop(s)")
+    st.markdown(f"**Shop run**: {n:,} items · {money(total)} across {len(route)} shop(s)")
     st.dataframe(
         pd.DataFrame([{"Shop": s["name"], "Items": s["items"], "Payout": s["payout"]} for s in route]),
         width="stretch",
         hide_index=True,
-        column_config={"Payout": st.column_config.NumberColumn(format="localized")},
+        column_config={"Payout": st.column_config.NumberColumn(format="compact")},
     )
     st.markdown(f"[**Start shop run →**]({route[0]['url']})")
     st.caption(
@@ -472,7 +473,7 @@ def _render_market_run(edited: pd.DataFrame) -> None:
     units = int(market["Selling"].sum())
     total = float(market.apply(_row_proceeds, axis=1).sum())
     st.markdown(
-        f"**Market listings**: {units:,} items ({market['item_id'].nunique()} kinds) · about ${total:,.0f} after the "
+        f"**Market listings**: {units:,} items ({market['item_id'].nunique()} kinds) · about {money(total)} after the "
         f"{MARKET_FEE:.0%} tax"
     )
     st.markdown(f"[**Open Add Listing →**]({ADD_LISTING_URL})")
@@ -501,7 +502,7 @@ def _render_museum(sets: list[dict], point_price) -> None:
     if not point_price:
         st.caption("Museum sets: couldn't read the points market this run, so sets can't be compared.")
         return
-    st.markdown(f"**Museum sets** · points at ${point_price:,.0f} each")
+    st.markdown(f"**Museum sets** · points at {money(point_price)} each")
     st.dataframe(
         pd.DataFrame([
             {
@@ -518,7 +519,7 @@ def _render_museum(sets: list[dict], point_price) -> None:
         ]),
         width="stretch",
         hide_index=True,
-        column_config={c: st.column_config.NumberColumn(format="localized") for c in ("Exchanged", "Sold", "Gain / set", "Cost (ref)")},
+        column_config={c: st.column_config.NumberColumn(format="compact") for c in ("Exchanged", "Sold", "Gain / set", "Cost (ref)")},
     )
     st.caption(
         "**Exchanged** is the set's points at the cheapest points-market price; **Sold** is every piece at its "
@@ -543,7 +544,10 @@ def _render_my_listings(rows: list[dict]) -> None:
         width="stretch",
         hide_index=True,
         column_order=("Item", "Quality", "Amount", "Your price", "Cheapest other", "Cheaper listings", "New price", "Status"),
-        column_config={c: st.column_config.NumberColumn(format="localized") for c in ("Amount", "Your price", "Cheapest other", "New price")},
+        column_config={
+            "Amount": st.column_config.NumberColumn(format="localized"),
+            **{c: st.column_config.NumberColumn(format="compact") for c in ("Your price", "Cheapest other", "New price")},
+        },
     )
     st.markdown(f"[**Open your listings →**]({VIEW_LISTINGS_URL})")
     st.caption(
@@ -553,14 +557,14 @@ def _render_my_listings(rows: list[dict]) -> None:
     )
 
 
-def _render_money(money: Optional[dict], proceeds: float) -> None:
-    if not money or not money.get("cash"):
+def _render_money(funds: Optional[dict], proceeds: float) -> None:
+    if not funds or not funds.get("cash"):
         return
-    wallet = money["cash"].get("wallet", 0.0)
+    wallet = funds["cash"].get("wallet", 0.0)
     text = (
-        f"Wallet now ${wallet:,.0f} · this plan adds about ${proceeds:,.0f} → **${wallet + proceeds:,.0f}** "
-        f"(everything: ${money['cash_total'] + proceeds:,.0f} cash"
-        + (f", networth ${money['networth']:,.0f} today" if money.get("networth") else "")
+        f"Wallet now {money(wallet)} · this plan adds about {money(proceeds)} → **{money(wallet + proceeds)}** "
+        f"(everything: {money(funds['cash_total'] + proceeds)} cash"
+        + (f", networth {money(funds['networth'])} today" if funds.get("networth") else "")
         + ")."
     )
     # Escaped: two bare $ in one markdown line render as a math formula.

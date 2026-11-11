@@ -263,7 +263,7 @@ class SellPlanTabAppTest(unittest.TestCase):
         # Harness: Kevlar Gloves fast 850 vs shop 1,000 -> Shop; the AK-47 copy
         # (quality 30, ~$1.3k) -> Dump.
         metrics = {m.label: m.value for m in at.metric}
-        self.assertEqual(metrics["Shop (1)"], "$3,000")
+        self.assertEqual(metrics["Shop (1)"], "$3k")
         self.assertIn("Dump (1)", metrics)
         self.assertEqual(config.load_sell_prefs(), ({}, {}))
 

@@ -8,6 +8,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+from tma.fmt import money
 from tma.profile import SLOTS, item_image_url, total_money
 
 _STATUS_COLORS = {"green": "#43a047", "red": "#e53935", "blue": "#1e88e5"}
@@ -51,16 +52,16 @@ def render_profile_card(bundle: dict, point_price: Optional[float] = None) -> No
             + _bar("Happy", bars.get("happy"), "#fdd835"),
             unsafe_allow_html=True,
         )
-        money = total_money(bundle.get("money"), point_price)
-        if money["cash"]:
-            parts = [f"Wallet **${money['cash'].get('wallet', 0):,.0f}**"]
-            banked = money["cash_total"] - money["cash"].get("wallet", 0)
+        funds = total_money(bundle.get("money"), point_price)
+        if funds["cash"]:
+            parts = [f"Wallet **{money(funds['cash'].get('wallet', 0))}**"]
+            banked = funds["cash_total"] - funds["cash"].get("wallet", 0)
             if banked:
-                parts.append(f"banked/other ${banked:,.0f}")
-            pts = f"{money['points']:,} points" + (f" (≈${money['points_value']:,.0f})" if money["points_value"] else "")
+                parts.append(f"banked/other {money(banked)}")
+            pts = f"{funds['points']:,} points" + (f" (≈{money(funds['points_value'])})" if funds["points_value"] else "")
             parts.append(pts)
-            if money["networth"]:
-                parts.append(f"networth ${money['networth']:,.0f}")
+            if funds["networth"]:
+                parts.append(f"networth {money(funds['networth'])}")
             # Escaped: two bare $ in one markdown line render as a math formula.
             st.markdown(" · ".join(parts).replace("$", "\\$"))
 
@@ -97,13 +98,13 @@ def render_loadout(equipment: Optional[list[dict]], values: Optional[dict] = Non
             st.caption("Click **Run** to price your loadout on today's market.")
         else:
             total = df["Worth today"].fillna(0).sum()
-            st.caption(f"Worth about **${total:,.0f}** on today's market (copies priced at their quality).")
+            st.caption(f"Worth about **{money(total)}** on today's market (copies priced at their quality).")
         st.dataframe(
             df,
             width="stretch",
             hide_index=True,
             column_config={
                 "Image": st.column_config.ImageColumn("", width="small"),
-                "Worth today": st.column_config.NumberColumn(format="localized"),
+                "Worth today": st.column_config.NumberColumn(format="compact"),
             },
         )

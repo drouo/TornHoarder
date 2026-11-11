@@ -39,7 +39,7 @@ class ReviewListingTest(unittest.TestCase):
         # Shop pays 950 -> market floor ceil(950 / 0.95) = 1000.
         r = review_listing(mine(1100), market(990, 1100), shop_price=950)
         self.assertIsNone(r["New price"])
-        self.assertIn("under your floor $1,000", r["Status"])
+        self.assertIn("under your floor $1k", r["Status"])
 
     def test_copies_only_compete_with_equal_or_better_quality(self):
         listing = mine(5000, amount=1, uid=123, quality=40.0, iid=8, name="Axe")

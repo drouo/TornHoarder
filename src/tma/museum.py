@@ -15,6 +15,7 @@ from typing import Optional
 
 import requests
 
+from .fmt import money
 from .http_client import BASE_URL, get_json_with_retry
 from .sell_plan import MARKET_FEE
 
@@ -111,8 +112,8 @@ def museum_holds(evaluations: list[dict]) -> dict[int, tuple[int, str]]:
         if e["better"] != "Exchange" or not e["complete"]:
             continue
         why = (
-            f"museum: {e['complete']} {e['set']} set(s) worth ${e['exchange_value']:,.0f} each exchanged "
-            f"vs ${e['sell_value']:,.0f} sold"
+            f"museum: {e['complete']} {e['set']} set(s) worth {money(e['exchange_value'])} each exchanged "
+            f"vs {money(e['sell_value'])} sold"
         )
         for iid in e["items"]:
             n, _ = holds.get(iid, (0, ""))

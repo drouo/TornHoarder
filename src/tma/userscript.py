@@ -45,6 +45,23 @@ TEMPLATE = """\
         return "$" + Math.round(n).toLocaleString("en-US");
     }
 
+    // "Select all · Deselect all" for a review panel: sets every id in or out.
+    function selectLinks(panelEl, excludedObj, ids, onDone) {
+        var div = document.createElement("div");
+        div.style.cssText = "margin-bottom:4px;";
+        [["Select all", false], ["Deselect all", true]].forEach(function (pair, i) {
+            var link = document.createElement("span");
+            link.textContent = pair[0];
+            link.style.cssText = "color:#64b5f6;text-decoration:underline;cursor:pointer;" + (i ? "margin-left:14px;" : "");
+            link.addEventListener("click", function () {
+                ids.forEach(function (id) { excludedObj[id] = pair[1]; });
+                onDone();
+            });
+            div.appendChild(link);
+        });
+        panelEl.appendChild(div);
+    }
+
     // Set a field the way typing would, so the page's own code sees the change.
     function setField(input, value) {
         var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
@@ -560,11 +577,15 @@ TEMPLATE = """\
                     return;
                 }
                 panelSig = sig;
+                // Rebuilding the panel resets its scroll; keep the reader's place.
+                var keepTop = panel.scrollTop;
                 panel.textContent = "";
                 var total = 0;
+                var picked = 0;
                 lines.forEach(function (l) {
                     if (!excluded[l.id]) {
                         total += l.value;
+                        picked += 1;
                     }
                 });
                 var already = tornTotals();
@@ -572,8 +593,9 @@ TEMPLATE = """\
                     line("Torn already has " + already.items.toLocaleString("en-US") + " item(s) selected from before. " +
                         "Clear them first with Torn's Clear all, so you only add what you planned.", "color:#ffb74d;margin-bottom:6px;");
                 }
-                line("Planned listings (" + lines.length + " items, about " + fmtMoney(total) + "). Click a line to leave it out:",
+                line("Planned listings (" + picked + " of " + lines.length + " items, about " + fmtMoney(total) + "). Click a line to leave it out:",
                     "color:#9ccc65;margin-bottom:4px;");
+                selectLinks(panel, excluded, lines.map(function (l) { return l.id; }), render);
                 lines.forEach(function (l) {
                     var x = excluded[l.id];
                     var text = (x ? "✕ " : "✓ ") + l.qty.toLocaleString("en-US") + " × " + l.name +
@@ -583,6 +605,7 @@ TEMPLATE = """\
                         render();
                     });
                 });
+                panel.scrollTop = keepTop;
                 return;
             }
             var keys = Object.keys(filled);
@@ -593,6 +616,7 @@ TEMPLATE = """\
                 return;
             }
             panelSig = sig;
+            var keepTop = panel.scrollTop;
             panel.textContent = "";
             var byName = {};
             var order = [];
@@ -630,6 +654,7 @@ TEMPLATE = """\
                 }
                 line("Start over (clears Torn's selections)", "color:#64b5f6;margin-top:6px;text-decoration:underline;", startOver);
             }
+            panel.scrollTop = keepTop;
         }
 
         function startOver() {
@@ -665,8 +690,10 @@ TEMPLATE = """\
             } else if (c) {
                 btn.textContent = "Confirm: add " + (totals ? totals.items : "") + " listing(s)";
             } else if (phase === "plan") {
-                var lines = plannedLines().filter(function (l) { return !excluded[l.id]; });
-                btn.textContent = lines.length ? "Fill " + lines.length + " item(s) for listing" : "Nothing planned to list";
+                var all = plannedLines();
+                var lines = all.filter(function (l) { return !excluded[l.id]; });
+                btn.textContent = lines.length ? "Fill " + lines.length + " item(s) for listing"
+                    : all.length ? "Nothing selected: pick items in the list" : "Nothing planned to list";
             } else if (totals && totals.items > 0) {
                 btn.textContent = "Add " + totals.items.toLocaleString("en-US") + " listing(s) to market · " + fmtMoney(totals.total);
             } else if (phase === "adding" || phase === "done") {
@@ -689,7 +716,9 @@ TEMPLATE = """\
                 return;
             }
             if (phase === "plan") {
-                fillAll();
+                if (plannedLines().some(function (l) { return !excluded[l.id]; })) {
+                    fillAll();
+                }
                 return;
             }
             var totals = tornTotals();
@@ -702,7 +731,7 @@ TEMPLATE = """\
             }
         });
 
-        window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups };
+        window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups, selectLinks: selectLinks };
         render();
         setInterval(render, 700);
         console.log("[TornHoarder] list mode v" + VER + ": " + plannedLines().length + " item(s) planned");
@@ -765,11 +794,13 @@ TEMPLATE = """\
                 return;
             }
             panelSig = sig;
+            var keepTop = panel.scrollTop;
             panel.textContent = "";
             var head = document.createElement("div");
             head.textContent = "Will sell here (click a line to leave it out):";
             head.style.cssText = "color:#9ccc65;margin-bottom:4px;";
             panel.appendChild(head);
+            selectLinks(panel, excluded, order, render);
             order.forEach(function (id) {
                 var g = byId[id];
                 var line = document.createElement("div");
@@ -782,6 +813,7 @@ TEMPLATE = """\
                 });
                 panel.appendChild(line);
             });
+            panel.scrollTop = keepTop;
         }
 
         function ourRows(includeExcluded) {

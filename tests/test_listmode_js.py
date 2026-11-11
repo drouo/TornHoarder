@@ -31,7 +31,29 @@ global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const L = window.__TH_LIST__;
 const cases = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-const out = cases.map(c => c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned, c.shopHeld));
+function selectCase(c) {
+  // A fake panel: collect the links, click them in order, report what's excluded.
+  const kids = [];
+  const panel = { appendChild(d) { kids.push(d); } };
+  const made = [];
+  const origCreate = document.createElement;
+  document.createElement = () => {
+    const e = { style: {}, kids: [], appendChild(k) { this.kids.push(k); }, addEventListener(_, f) { this.onclick = f; } };
+    made.push(e);
+    return e;
+  };
+  const excluded = Object.assign({}, c.excluded);
+  let redraws = 0;
+  L.selectLinks(panel, excluded, c.ids, () => { redraws += 1; });
+  document.createElement = origCreate;
+  const links = kids[0].kids;
+  const states = c.clicks.map(label => {
+    links.find(l => l.textContent === label).onclick();
+    return c.ids.filter(id => excluded[id]);
+  });
+  return { labels: links.map(l => l.textContent), states, redraws };
+}
+const out = cases.map(c => c.select ? selectCase(c) : c.lines ? L.plannedLines() : L.planListing(c.id, c.entry, c.rolls, c.isCopy, c.owned, c.shopHeld));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -131,6 +153,14 @@ class ListModeDecisionsTest(unittest.TestCase):
         self.assertEqual((bat["qty"], round(bat["value"])), (31, 310000))
         axe = next(l for l in lines if l["name"] == "Axe")
         self.assertEqual((axe["qty"], axe["copies"]), (3, True))
+
+
+    def test_select_all_and_deselect_all(self):
+        (r,) = self.run_cases([{"select": True, "ids": ["180", "8", "999"], "excluded": {"8": True},
+                                "clicks": ["Deselect all", "Select all"]}])
+        self.assertEqual(r["labels"], ["Select all", "Deselect all"])
+        self.assertEqual(r["states"], [["180", "8", "999"], []])
+        self.assertEqual(r["redraws"], 2)
 
 
 if __name__ == "__main__":

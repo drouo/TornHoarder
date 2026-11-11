@@ -27,3 +27,6 @@ data/uid_stats.json
 
 # One row per priced item per run
 data/price_history.csv
+
+# Museum sets (torn/museum), refreshed daily
+data/museum_sets.json

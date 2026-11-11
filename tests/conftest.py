@@ -43,6 +43,11 @@ def no_catalog_refresh(monkeypatch):
 
     monkeypatch.setattr(crime_items, "refresh_oc_items_if_stale", lambda *a, **k: (False, None))
 
+    from tma import museum
+
+    monkeypatch.setattr(museum, "refresh_museum_if_stale", lambda *a, **k: (False, None))
+    monkeypatch.setattr(museum, "fetch_point_price", lambda *a, **k: (None, "not fetched in tests"))
+
 
 @pytest.fixture(autouse=True)
 def isolate_autofill_output(tmp_path, monkeypatch):
@@ -74,3 +79,4 @@ def isolate_stats_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(paths, "UID_STATS_PATH", tmp_path / "uid_stats.json")
     monkeypatch.setattr(paths, "PRICE_HISTORY_PATH", tmp_path / "price_history.csv")
+    monkeypatch.setattr(paths, "MUSEUM_PATH", tmp_path / "museum_sets.json")

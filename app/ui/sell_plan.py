@@ -19,6 +19,7 @@ from dataclasses import replace
 from tma.config import load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
 from tma.crime_items import load_oc_items
 from tma.inventory import inventory_category_for_profile
+from tma.museum import evaluate_sets, museum_holds
 from tma.sell_plan import (
     KEEP_ALL,
     LABEL_TO_PLAN,
@@ -70,13 +71,17 @@ def plan_rows(
     known: Optional[dict] = None,
     oc_items: Optional[dict] = None,
     reserves: Optional[dict[int, int]] = None,
+    museum: Optional[dict[int, tuple[int, str]]] = None,
 ) -> list[dict]:
     """One row per pricing-table row (stackables combined, one per weapon/armor copy).
 
     Reserves come first: a stack sells only what's above its keep number,
     and for weapon/armor the best copies (by quality) are the ones kept.
+    Museum holds (pieces of complete sets worth more exchanged) add to the
+    automatic reserve; a number typed into Keeping still wins.
     """
     reserves = reserves or {}
+    museum = museum or {}
     keep_by_item: dict[int, tuple[int, str]] = {}
     for ro in rows_out:
         iid = int(ro["item_id"])
@@ -85,6 +90,8 @@ def plan_rows(
             keep_by_item[iid] = reserve_for(
                 iid, prof, inventory_category_for_profile(prof), rules, oc_items, reserves.get(iid)
             )
+            if iid not in reserves and iid in museum and museum[iid][0] > keep_by_item[iid][0]:
+                keep_by_item[iid] = museum[iid]
     kept_copies: set[int] = set()
     for iid, (n, _) in keep_by_item.items():
         copies = [i for i, ro in enumerate(rows_out) if int(ro["item_id"]) == iid and ro.get("is_stat")]
@@ -327,8 +334,10 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     known = load_shop_knowledge(SHOP_BUYS_PATH)
     oc_items = load_oc_items(OC_ITEMS_PATH)
     reserves = load_reserves()
+    museum_sets = museum_table(ctx["rows_out"], summary_by_id, profiles, an.get("museum") or {})
     rows = plan_rows(
-        ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, reserves
+        ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, reserves,
+        museum_holds(museum_sets),
     )
     # data_editor stores edits by row position, so the order must not depend
     # on the plan (which edits change) — stack value doesn't.
@@ -376,6 +385,7 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     shop_run = build_shop_run(shop_rows(edited), profiles, known)
     _render_shop_run(shop_run)
     _render_market_run(edited)
+    _render_museum(museum_sets, (an.get("museum") or {}).get("point_price"))
 
     return {
         "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known),
@@ -469,4 +479,48 @@ def _render_market_run(edited: pd.DataFrame) -> None:
         "out), then **Fill** goes tab by tab filling quantity and price for every planned row (weapon/armor priced from "
         "each copy's rolls; Keep, crime items and your best copies are left alone). Check the list, then **Add** presses "
         "Torn's ADD TO MARKET. Nothing is listed until you click."
+    )
+
+
+def museum_table(rows_out: list[dict], summary_by_id: dict[int, dict], profiles: dict, museum: dict) -> list[dict]:
+    owned: dict[int, int] = {}
+    for ro in rows_out:
+        iid = int(ro["item_id"])
+        owned[iid] = owned.get(iid, 0) + int(_num(ro.get("My quantity")) or 0)
+    unit = {iid: _num(r.get("fast_sell_price")) for iid, r in summary_by_id.items()}
+    ref = {int(k): p.get("market_price") for k, p in profiles.items()}
+    names = {int(k): p.get("name") for k, p in profiles.items()}
+    return evaluate_sets(museum.get("sets") or [], owned, unit, ref, names, museum.get("point_price"))
+
+
+def _render_museum(sets: list[dict], point_price) -> None:
+    if not sets:
+        return
+    if not point_price:
+        st.caption("Museum sets: couldn't read the points market this run, so sets can't be compared.")
+        return
+    st.markdown(f"**Museum sets** · points at ${point_price:,.0f} each")
+    st.dataframe(
+        pd.DataFrame([
+            {
+                "Set": e["set"],
+                "Complete": e["complete"],
+                "Exchanged": e["exchange_value"],
+                "Sold": e["sell_value"],
+                "Better": e["better"],
+                "Gain / set": e["gain_per_set"],
+                "Next set needs": ", ".join(e["missing"]) if len(e["missing"]) <= 3 else f"{len(e['missing'])} pieces",
+                "Cost (ref)": e["missing_cost"],
+            }
+            for e in sorted(sets, key=lambda e: (-e["complete"], len(e["missing"])))
+        ]),
+        width="stretch",
+        hide_index=True,
+        column_config={c: st.column_config.NumberColumn(format="%,.0f") for c in ("Exchanged", "Sold", "Gain / set", "Cost (ref)")},
+    )
+    st.caption(
+        "**Exchanged** is the set's points at the cheapest points-market price; **Sold** is every piece at its "
+        f"fast-sell price after the {MARKET_FEE:.0%} tax (Torn's reference price for pieces you don't own). When "
+        "exchanging is better, one of each piece per complete set is kept out of the plan automatically; trade "
+        "them in at the museum. **Next set needs** is what one more set is missing, at reference prices."
     )

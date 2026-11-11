@@ -14,11 +14,12 @@ if str(ROOT_DIR) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.paths import DICT_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, UID_STATS_PATH
+from app.paths import DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, UID_STATS_PATH
 from app.ui import autofill_export
 from app.ui.results import render_results
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
+from tma import museum
 from tma.crime_items import refresh_oc_items_if_stale
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
@@ -323,6 +324,12 @@ if submitted:
             st.caption("Refreshed the list of items Organized Crimes need.")
         elif oc_err:
             st.caption(f"Couldn't refresh the Organized Crime item list ({oc_err}); using the saved copy.")
+        _, museum_err = museum.refresh_museum_if_stale(sess, api_key, MUSEUM_PATH)
+        if museum_err:
+            st.caption(f"Couldn't refresh the museum sets ({museum_err}); using the saved copy.")
+        point_price, point_err = museum.fetch_point_price(sess, api_key)
+        if point_err:
+            st.caption(f"Couldn't read the points market ({point_err}); museum sets can't be compared.")
 
     if source == "API inventory":
         planned = len(pull_categories) if pull_categories is not None else len(INVENTORY_CATEGORIES)
@@ -598,6 +605,7 @@ if submitted:
             "profiles": profiles,
             "entries": entries,
             "uid_stats": uid_stats if source in ("API inventory", "Single item") else {},
+            "museum": {"sets": museum.load_museum(MUSEUM_PATH), "point_price": point_price},
         }
         st.session_state["has_data"] = True
 

@@ -42,10 +42,15 @@ def fetch_city_shops(
     return out, None
 
 
-def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataFrame:
+def scan_flips(
+    shop_items: list[dict], market_rows: dict[int, dict], ref_prices: Optional[dict[int, float]] = None
+) -> pd.DataFrame:
     """One row per city item that would resell at a profit, best first.
 
-    Resale price is $1 under the cheapest current listing, after tax. Cash is
+    Resale price is $1 under the cheapest current listing, after tax, but never
+    above Torn's market value (what it has recently sold for): a listing can
+    ask anything, e.g. Parachutes listed at $480m while they sell near $448m,
+    under the $450m shop price. Cash is
     no object, so the limit is how many will sell: "Worth buying" assumes you
     can sell about as many as are listed now (capped by shop stock) without
     sinking the price, and items are ranked by the profit on that many.
@@ -56,7 +61,9 @@ def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataF
         if not listings or not it["price"]:
             continue
         floor = min(l["price"] for l in listings)
-        profit = (floor - 1) * (1.0 - MARKET_FEE) - it["price"]
+        ref = (ref_prices or {}).get(it["item_id"]) or 0
+        sell = min(floor - 1, ref) if ref > 0 else floor - 1
+        profit = sell * (1.0 - MARKET_FEE) - it["price"]
         if profit <= 0:
             continue
         listed = int(sum(l.get("amount") or 0 for l in listings))
@@ -66,8 +73,10 @@ def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataF
             "Shop": it["shop"],
             "In stock": it["stock"],
             "Buy at": it["price"],
-            "Sell at": floor - 1,
+            "Sell at": sell,
+            "Market value": ref or None,
             "Profit / unit": round(profit),
+            "Margin %": round(100.0 * profit / it["price"], 1),
             "Listed for sale": listed,
             "Worth buying": units,
             "Profit": round(profit * units),
@@ -78,6 +87,38 @@ def scan_flips(shop_items: list[dict], market_rows: dict[int, dict]) -> pd.DataF
     if df.empty:
         return df
     return df.sort_values(["Profit", "Profit / unit"], ascending=False).reset_index(drop=True)
+
+
+DAILY_CAP = 100  # Torn: 100 city-shop items a day, all shops together
+
+
+def daily_buy_plan(flips: pd.DataFrame, cap: int = DAILY_CAP, backups: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(buys, backups): the day's `cap` purchases, most profit per item first,
+    each up to "Worth buying"; then the next in-stock items to fall back on if
+    a pick has sold out by the time you reach its shop."""
+    if flips.empty:
+        return flips, flips
+    ranked = flips[flips["Worth buying"] > 0].sort_values("Profit / unit", ascending=False)
+    left = int(cap)
+    picks, spare = [], []
+    for _, r in ranked.iterrows():
+        if left > 0:
+            qty = min(int(r["Worth buying"]), left)
+            left -= qty
+            picks.append({**r.to_dict(), "Buy": qty})
+            if qty < int(r["Worth buying"]):
+                # A partly-used item also backs up the picks above it.
+                spare.append({**r.to_dict(), "Buy": int(r["Worth buying"]) - qty})
+        elif len(spare) < backups:
+            spare.append({**r.to_dict(), "Buy": min(int(r["Worth buying"]), int(cap))})
+    out = []
+    for rows in (picks, spare[:backups]):
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df["Profit"] = (df["Profit / unit"] * df["Buy"]).round()
+            df["Cost"] = (df["Buy at"] * df["Buy"]).round()
+        out.append(df.reset_index(drop=True))
+    return out[0], out[1]
 
 
 def log_stock(path: Path, shop_items: list[dict], stamp: str) -> int:

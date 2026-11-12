@@ -8,9 +8,10 @@ import pandas as pd
 import streamlit as st
 
 from tma.fmt import money
+from tma.item_stats import load_profiles
 from tma.http_client import session_for_requests, shared_bucket
 from tma.market_fetch import fetch_all_item_markets
-from tma.shop_flips import fetch_city_shops, log_stock, scan_flips
+from tma.shop_flips import DAILY_CAP, daily_buy_plan, fetch_city_shops, log_stock, scan_flips
 
 from .. import paths
 from .page_progress import PageProgress
@@ -20,7 +21,8 @@ def render_shop_scan(api_key: str) -> None:
     with st.expander("Shop flips: buy in city shops, resell on the market"):
         st.caption(
             "Checks every city shop's current stock against live market listings (about 110 API calls, a minute "
-            "or so). Profit is $1 under the cheapest listing after Torn's 5% sales tax, minus the shop price. "
+            "or so). Profit is $1 under the cheapest listing (never above Torn's market value, what "
+            "it has actually been selling for) after Torn's 5% sales tax, minus the shop price. "
             "Each scan also logs shop stock to `data/cityshop_stock.csv` so restocks can be learned later."
         )
         if st.button("Scan shops", key="scan_shops", disabled=not api_key):
@@ -48,7 +50,7 @@ def render_shop_scan(api_key: str) -> None:
             # Logged only once the scan completes, so a scan cut short by a page rerun isn't recorded twice.
             log_stock(paths.CITYSHOP_STOCK_PATH, items, stamp)
             st.session_state["shop_scan"] = {
-                "df": scan_flips(items, rows),
+                "df": scan_flips(items, rows, {int(k): v.get("market_price") for k, v in load_profiles(paths.PROFILES_PATH).items()}),
                 "when": pd.Timestamp.now().strftime("%H:%M"),
                 "n_items": len(items),
                 "secs": time.monotonic() - start,
@@ -56,7 +58,13 @@ def render_shop_scan(api_key: str) -> None:
         scan = st.session_state.get("shop_scan")
         if not scan:
             return
+        min_margin = st.number_input(
+            "Minimum margin %", min_value=0.0, max_value=10000.0, value=10.0, step=5.0, key="min_margin",
+            help="Leave out flips that earn less than this share of what you pay, e.g. $160k on a $45m car is 0.35%.",
+        )
         df = scan["df"]
+        if not df.empty:
+            df = df[df["Margin %"] >= min_margin]
         st.markdown(f"Scanned {scan['n_items']} shop items at {scan['when']} ({scan['secs']:.0f}s).")
         if df.empty:
             st.info("Nothing in the city shops resells at a profit right now.")
@@ -64,9 +72,27 @@ def render_shop_scan(api_key: str) -> None:
         in_stock = df[df["In stock"] > 0]
         out = df[df["In stock"] == 0]
         cfg = {
-            **{c: st.column_config.NumberColumn(format="compact") for c in ("Buy at", "Sell at", "Profit / unit", "Profit", "Cost")},
+            **{c: st.column_config.NumberColumn(format="compact") for c in ("Buy at", "Sell at", "Market value", "Profit / unit", "Profit", "Cost")},
+            "Margin %": st.column_config.NumberColumn(format="%.0f%%"),
             **{c: st.column_config.NumberColumn(format="localized") for c in ("In stock", "Listed for sale", "Worth buying")},
         }
+        cap = st.number_input(
+            "Daily shop purchase limit", min_value=1, max_value=1000, value=DAILY_CAP, step=10, key="daily_buy_cap",
+            help="Torn lets you buy 100 items a day from city shops, all shops together.",
+        )
+        buys, spare = daily_buy_plan(df, int(cap))
+        if not buys.empty:
+            st.markdown(
+                f"**Today's {int(buys['Buy'].sum())} buys**: about **{money(buys['Profit'].sum())}** profit for "
+                f"{money(buys['Cost'].sum())}. Most profit per item first, since the limit counts items, not dollars."
+                .replace("$", "\\$")
+            )
+            plan_cfg = {**cfg, "Buy": st.column_config.NumberColumn(format="localized")}
+            plan_cols = ("Item", "Shop", "Buy", "Buy at", "Sell at", "Profit / unit", "Margin %", "Profit", "Cost", "In stock")
+            st.dataframe(buys, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)
+            if not spare.empty:
+                st.markdown("**Backups**, if a pick has sold out when you get there:")
+                st.dataframe(spare, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)
         if in_stock.empty:
             st.info("Every profitable item is sold out right now.")
         else:
@@ -77,7 +103,7 @@ def render_shop_scan(api_key: str) -> None:
             )
             st.dataframe(
                 in_stock, width="stretch", hide_index=True, column_config=cfg,
-                column_order=("Item", "Shop", "Buy at", "Sell at", "Profit / unit", "Worth buying", "Profit", "Cost", "In stock"),
+                column_order=("Item", "Shop", "Buy at", "Sell at", "Profit / unit", "Margin %", "Worth buying", "Profit", "Cost", "In stock"),
             )
         if not out.empty:
             st.markdown(f"**Profitable but sold out** ({len(out)}): check back after a restock.")

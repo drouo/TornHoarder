@@ -12,7 +12,9 @@ sys.path.insert(0, str(ROOT))
 
 from app.ui.profile_card import loadout_rows
 from tma.profile import away_from_torn, equipped_value, item_image_url, total_money
-from tma.shop_flips import log_stock, scan_flips
+import pandas as pd
+
+from tma.shop_flips import daily_buy_plan, log_stock, scan_flips
 
 
 class ProfileTest(unittest.TestCase):
@@ -73,6 +75,30 @@ class ShopFlipsTest(unittest.TestCase):
         # Sold out: nothing worth buying now, but still shown for after a restock.
         cag = df[df["Item"] == "Cagoutte"].iloc[0]
         self.assertEqual((cag["In stock"], cag["Worth buying"], cag["Profit"]), (0, 0, 0))
+
+    def test_resale_is_capped_at_what_the_item_actually_sells_for(self):
+        # Seen live: Parachutes listed from $480m, sell near $447.6m, cost $450m in Nikeh Sports.
+        shop = [{"shop": "Nikeh Sports", "item_id": 106, "item_name": "Parachute", "price": 450e6, "stock": 509, "default_stock": 0}]
+        market = {106: {"item_id": 106, "price_1": 480e6, "amount_1": 14}}
+        self.assertFalse(scan_flips(shop, market).empty)  # the listing alone looks like a $6m flip
+        self.assertTrue(scan_flips(shop, market, {106: 447_588_888}).empty)
+        rose = scan_flips(SHOP_ITEMS, MARKET, {1: 900}).iloc[0]
+        self.assertEqual((rose["Sell at"], rose["Market value"]), (900, 900))
+
+    def test_daily_plan_fills_the_cap_with_most_profit_per_item_then_backups(self):
+        def row(item, per, worth, buy_at=10.0):
+            return {"Item": item, "Shop": "S", "Buy at": buy_at, "Sell at": buy_at + per, "Profit / unit": per,
+                    "Worth buying": worth, "In stock": worth}
+        flips = pd.DataFrame([row("Glue", 500, 800), row("Parachute", 6_000_000, 14, 450e6),
+                              row("Gone", 9_000_000, 0), row("Tyrosine", 19_000, 62), row("Mask", 422, 1000),
+                              row("Rose", 204, 649)])
+        buys, spare = daily_buy_plan(flips, cap=100, backups=2)
+        self.assertEqual(list(buys["Item"]), ["Parachute", "Tyrosine", "Glue"])  # sold-out "Gone" skipped
+        self.assertEqual(list(buys["Buy"]), [14, 62, 24])
+        self.assertEqual(buys["Profit"].iloc[0], 84_000_000)
+        # Glue's unused 776 back up the picks first, then the next item.
+        self.assertEqual(list(spare["Item"]), ["Glue", "Mask"])
+        self.assertEqual(list(spare["Buy"]), [776, 100])
 
     def test_stock_log_appends_with_one_header(self):
         with TemporaryDirectory() as d:

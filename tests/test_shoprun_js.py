@@ -38,9 +38,18 @@ eval(fs.readFileSync(process.argv[2], "utf8"));
 const btn = made.find(e => e.id === "tma-shop-btn");
 const panel = made.find(e => e.id === "tma-shop-review");
 const text = e => [e.textContent].concat(e.kids.map(text)).join("\n");
-const before = { button: btn.textContent, panel: text(panel), shown: panel.style.display };
+const dock = made.find(e => e.id === "th-dock");
+const bar = dock.kids[0];
+const before = { button: btn.textContent, panel: text(panel), shown: panel.style.display, dock: dock.style.cssText };
+const tap = label => bar.kids.find(b => b.textContent === label).onclick();
+tap("◀");
+before.left = dock.style.cssText;
+before.saved = store["tornhoarder.dock"];
+tap("–");
+before.folded = dock.kids[2].style.display;
+tap("–");
 btn.onclick();
-process.stdout.write(JSON.stringify(Object.assign(before, { went: location.href })));
+process.stdout.write(JSON.stringify(Object.assign(before, { went: location.href, after: dock.style.cssText })));
 """
 
 SHOP_RUN = {"route": [{"step": "pharmacy", "name": "Pharmacy", "items": 3, "payout": 27000, "url": "https://x/pharmacy"}],
@@ -71,6 +80,16 @@ class ShopRunDoneTest(unittest.TestCase):
         self.assertIn("Pharmacy: 3 item(s) · $27,000", out["panel"])
         self.assertIn("3 × Insulin", out["panel"])
         self.assertEqual(out["went"], "https://www.torn.com/page.php?sid=ItemMarket#/addListing")
+        # Clicking done also closes the dock, so the click visibly does something.
+        self.assertIn("display:flex", out["dock"])
+        self.assertIn("display:none", out["after"])
+
+    def test_dock_moves_to_a_margin_folds_and_remembers(self):
+        out = self.run_page([])
+        self.assertIn("left:50%", out["dock"])  # narrow/unknown window: centered
+        self.assertIn("left:12px", out["left"])
+        self.assertEqual(out["saved"], "left")
+        self.assertEqual(out["folded"], "none")
 
     def test_a_previous_runs_sales_are_not_counted(self):
         # Nothing stored for this build: the summary says so instead of totalling an old run.

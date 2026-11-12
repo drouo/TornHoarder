@@ -91,6 +91,94 @@ TEMPLATE = """\
         panelEl.appendChild(div);
     }
 
+    function readPref(key, fallback) {
+        try {
+            return localStorage.getItem(key) || fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function writePref(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) { /* storage blocked: the choice lasts until reload */ }
+    }
+
+    // Holds a mode's button and review panel. Docks centered over the page, or
+    // left/right in the empty margins; the list folds away; close hides it all
+    // until the page reloads. Side and fold are remembered in this browser.
+    var DOCK_KEY = "tornhoarder.dock";
+    function makeDock(btn, panel) {
+        var side = readPref(DOCK_KEY, (window.innerWidth || 0) >= 1500 ? "right" : "center");
+        var folded = readPref(DOCK_KEY + ".folded", "") === "1";
+        var closed = false;
+        var shown = true;
+        var host = document.createElement("div");
+        host.id = "th-dock";
+        var bar = document.createElement("div");
+        bar.style.cssText = "display:flex;justify-content:flex-end;gap:4px;";
+        var wrap = document.createElement("div");
+        var controls = {};
+        [["left", "◀", "Dock in the left margin"], ["center", "▣", "Center over the page"],
+         ["right", "▶", "Dock in the right margin"], ["fold", "–", "Hide or show the list"],
+         ["close", "✕", "Close until the page reloads"]].forEach(function (c) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.textContent = c[1];
+            b.title = c[2];
+            b.addEventListener("click", function () {
+                if (c[0] === "close") {
+                    closed = true;
+                } else if (c[0] === "fold") {
+                    folded = !folded;
+                    writePref(DOCK_KEY + ".folded", folded ? "1" : "");
+                } else {
+                    side = c[0];
+                    writePref(DOCK_KEY, side);
+                }
+                place();
+            });
+            controls[c[0]] = b;
+            bar.appendChild(b);
+        });
+        host.appendChild(bar);
+        host.appendChild(btn);
+        wrap.appendChild(panel);
+        host.appendChild(wrap);
+        document.body.appendChild(host);
+
+        function place() {
+            var docked = side !== "center";
+            host.style.cssText = "position:fixed;top:72px;z-index:999999;flex-direction:column;gap:6px;" +
+                "display:" + (shown && !closed ? "flex" : "none") + ";" +
+                (side === "left" ? "left:12px;width:340px;" : side === "right" ? "right:12px;width:340px;"
+                    : "left:50%;transform:translateX(-50%);");
+            btn.style.minWidth = docked ? "0" : "360px";
+            panel.style.maxHeight = docked ? "calc(100vh - 190px)" : "42vh";
+            wrap.style.display = folded ? "none" : "block";
+            Object.keys(controls).forEach(function (k) {
+                var on = k === side || (k === "fold" && folded);
+                controls[k].style.cssText = "padding:1px 8px;border-radius:4px;border:1px solid #2e7d32;cursor:pointer;" +
+                    "font:12px/1.4 Arial,sans-serif;color:#fff;background:" + (on ? "#2e7d32" : "rgba(0,0,0,.75)") + ";";
+            });
+        }
+        place();
+        return {
+            close: function () {
+                closed = true;
+                place();
+            },
+            // Off-page (e.g. another Item Market tab): hide without closing.
+            show: function (on) {
+                if (shown !== on) {
+                    shown = on;
+                    place();
+                }
+            }
+        };
+    }
+
     // Set a field the way typing would, so the page's own code sees the change.
     function setField(input, value) {
         var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
@@ -279,19 +367,16 @@ TEMPLATE = """\
         btn.type = "button";
         labelCopy(btn);
         btn.style.cssText =
-            "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
-            "min-width:360px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
+            "width:100%;box-sizing:border-box;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
             "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
             "box-shadow:0 4px 14px rgba(0,0,0,.5);display:none;";
-        document.body.appendChild(btn);
 
         var panel = document.createElement("div");
         panel.id = "th-list-review";
         panel.style.cssText =
-            "position:fixed;left:50%;top:160px;transform:translateX(-50%);z-index:999999;" +
-            "min-width:360px;max-width:560px;max-height:42vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
+            "box-sizing:border-box;max-width:560px;overflow:auto;padding:8px 12px;border-radius:8px;" +
             "background:rgba(0,0,0,.92);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;display:none;";
-        document.body.appendChild(panel);
+        var dock = makeDock(btn, panel);
 
         function onAddListing() {
             return /addListing/i.test(location.hash);
@@ -706,6 +791,7 @@ TEMPLATE = """\
 
         function render() {
             var show = onAddListing();
+            dock.show(show);
             btn.style.display = show ? "block" : "none";
             panel.style.display = show ? "block" : "none";
             if (!show) {
@@ -728,7 +814,7 @@ TEMPLATE = """\
             } else if (totals && totals.items > 0) {
                 btn.textContent = "Add " + totals.items.toLocaleString("en-US") + " listing(s) to market · " + fmtMoney(totals.total);
             } else if (phase === "adding" || phase === "done") {
-                btn.textContent = "Listed ✓";
+                btn.textContent = "Listed ✓ (click to close)";
                 phase = "done";
             } else {
                 btn.textContent = "Nothing filled. Start over below";
@@ -737,6 +823,10 @@ TEMPLATE = """\
 
         btn.addEventListener("click", function () {
             if (phase === "filling" || Date.now() < busyUntil) {
+                return;
+            }
+            if (phase === "done") {
+                dock.close();
                 return;
             }
             var c = confirmButton();
@@ -811,11 +901,9 @@ TEMPLATE = """\
         btn.type = "button";
         labelCopy(btn);
         btn.style.cssText =
-            "position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:999999;" +
-            "min-width:340px;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
+            "width:100%;box-sizing:border-box;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
             "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
             "box-shadow:0 4px 14px rgba(0,0,0,.5);";
-        document.body.appendChild(btn);
 
         // Review list under the button: what click 1 will fill, line by line.
         // Clicking a line leaves that item out of this shop's sale (and back in).
@@ -824,10 +912,9 @@ TEMPLATE = """\
         var panel = document.createElement("div");
         panel.id = "tma-shop-review";
         panel.style.cssText =
-            "position:fixed;left:50%;top:160px;transform:translateX(-50%);z-index:999999;" +
-            "min-width:340px;max-height:40vh;overflow:auto;padding:8px 12px;border-radius:8px;" +
+            "box-sizing:border-box;overflow:auto;padding:8px 12px;border-radius:8px;" +
             "background:rgba(0,0,0,.9);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;";
-        document.body.appendChild(panel);
+        var dock = makeDock(btn, panel);
 
         function renderPanel(allRows, confirming) {
             if (!allRows.length || confirming) {
@@ -1094,6 +1181,9 @@ TEMPLATE = """\
                 return;
             }
             var nxt = nextShop();
+            if (!nxt) {
+                dock.close();
+            }
             location.href = nxt ? nxt.url : ADD_LISTING_URL;
         });
 

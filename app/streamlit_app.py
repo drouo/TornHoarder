@@ -135,6 +135,12 @@ if st.session_state["api_key"]:
     _an = st.session_state.get("analysis") or {}
     render_profile_card(_bundle, (_an.get("museum") or {}).get("point_price"))
     render_loadout(_bundle.get("equipment"), _an.get("loadout_values"))
+    _away = profile.away_from_torn(_bundle)
+    if _away:
+        st.warning(
+            f"✈ {_away}. City shops and the Item Market are closed until you're back in Torn, so the shop run "
+            "and listing script stay paused. Running the app still works."
+        )
 render_shop_scan(st.session_state["api_key"])
 
 with st.expander("How it works"):

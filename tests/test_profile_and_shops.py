@@ -11,11 +11,18 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from app.ui.profile_card import loadout_rows
-from tma.profile import equipped_value, item_image_url, total_money
+from tma.profile import away_from_torn, equipped_value, item_image_url, total_money
 from tma.shop_flips import log_stock, scan_flips
 
 
 class ProfileTest(unittest.TestCase):
+    def test_away_from_torn_only_when_flying_or_abroad(self):
+        flying = {"profile": {"status": {"state": "Traveling", "description": "Traveling to Mexico"}}}
+        self.assertEqual(away_from_torn(flying), "Traveling to Mexico")
+        self.assertEqual(away_from_torn({"profile": {"status": {"state": "Abroad"}}}), "Abroad")
+        self.assertIsNone(away_from_torn({"profile": {"status": {"state": "Okay"}}}))
+        self.assertIsNone(away_from_torn({"profile": None}))
+
     def test_money_handles_plain_and_nested_amounts(self):
         m = total_money({"wallet": 1000, "vault": 500, "city_bank": {"amount": 2000, "profit": 9}, "faction": {"money": 300, "points": 4},
                          "points": 10, "daily_networth": 99999}, point_price=30000.0)

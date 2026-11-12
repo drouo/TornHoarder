@@ -31,7 +31,8 @@ global.localStorage = { getItem: k => store[k] || null, setItem: (k, v) => { sto
 global.window = { scrollTo() {} };
 window.top = window;
 global.location = { pathname: "/shops.php", search: "?step=pharmacy", hash: "", href: "" };
-global.document = { createElement: el, body: el(), querySelector() { return null }, querySelectorAll() { return []; }, title: "Pharmacy | TORN" };
+global.document = { createElement: el, body: Object.assign(el(), { dataset: JSON.parse(process.argv[4] || "{}") }),
+                    querySelector() { return null }, querySelectorAll() { return []; }, title: "Pharmacy | TORN" };
 global.setInterval = () => 0;
 global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
@@ -58,7 +59,7 @@ SHOP_RUN = {"route": [{"step": "pharmacy", "name": "Pharmacy", "items": 3, "payo
 
 @unittest.skipUnless(NODE, "node not installed")
 class ShopRunDoneTest(unittest.TestCase):
-    def run_page(self, sold):
+    def run_page(self, sold, body=None):
         with TemporaryDirectory() as d:
             d = Path(d)
             script = build_userscript({}, {}, shop_run=SHOP_RUN)
@@ -67,7 +68,7 @@ class ShopRunDoneTest(unittest.TestCase):
             store = {"tornhoarder.shopRun": json.dumps({"built": built, "sold": sold})} if sold is not None else {}
             (d / "s.user.js").write_text(script, encoding="utf-8")
             (d / "h.js").write_text(HARNESS, encoding="utf-8")
-            res = subprocess.run([NODE, str(d / "h.js"), str(d / "s.user.js"), json.dumps(store)],
+            res = subprocess.run([NODE, str(d / "h.js"), str(d / "s.user.js"), json.dumps(store), json.dumps(body or {})],
                                  capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(res.returncode, 0, res.stderr)
             return json.loads(res.stdout)
@@ -90,6 +91,13 @@ class ShopRunDoneTest(unittest.TestCase):
         self.assertIn("left:12px", out["left"])
         self.assertEqual(out["saved"], "left")
         self.assertEqual(out["folded"], "none")
+
+    def test_traveling_pauses_instead_of_walking_the_route(self):
+        # Seen live: in the air every shop says "unavailable while you're traveling".
+        out = self.run_page([], body={"traveling": "true", "abroad": "true", "country": "torn"})
+        self.assertIn("You're traveling", out["button"])
+        self.assertEqual(out["shown"], "none")
+        self.assertEqual(out["went"], "")  # the click goes nowhere
 
     def test_a_previous_runs_sales_are_not_counted(self):
         # Nothing stored for this build: the summary says so instead of totalling an old run.

@@ -26,6 +26,15 @@ def fetch_profile_bundle(session: requests.Session, api_key: str) -> dict:
     return out
 
 
+def away_from_torn(bundle: Optional[dict]) -> Optional[str]:
+    """Torn's status line ("Traveling to Mexico", "In Mexico") when you're in the
+    air or abroad, where city shops and the Item Market are closed; else None."""
+    status = ((bundle or {}).get("profile") or {}).get("status") or {}
+    if status.get("state") in ("Traveling", "Abroad"):
+        return status.get("description") or status["state"]
+    return None
+
+
 def item_image_url(item_id: int) -> str:
     return f"https://www.torn.com/images/items/{int(item_id)}/large.png"
 

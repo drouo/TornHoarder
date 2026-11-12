@@ -91,6 +91,19 @@ TEMPLATE = """\
         panelEl.appendChild(div);
     }
 
+    // Torn marks <body data-traveling="true"> in the air and data-abroad once
+    // landed elsewhere; shops and the Item Market are closed either way.
+    function awayMessage() {
+        var d = (document.body && document.body.dataset) || {};
+        if (d.traveling === "true") {
+            return "✈ You're traveling: TornHoarder is paused until you land in Torn";
+        }
+        if (d.abroad === "true") {
+            return "✈ You're abroad: TornHoarder is paused until you're back in Torn";
+        }
+        return "";
+    }
+
     function readPref(key, fallback) {
         try {
             return localStorage.getItem(key) || fallback;
@@ -797,6 +810,11 @@ TEMPLATE = """\
             if (!show) {
                 return;
             }
+            if (awayMessage()) {
+                btn.textContent = awayMessage();
+                panel.style.display = "none";
+                return;
+            }
             renderPanel();
             var totals = tornTotals();
             var c = confirmButton();
@@ -822,7 +840,7 @@ TEMPLATE = """\
         }
 
         btn.addEventListener("click", function () {
-            if (phase === "filling" || Date.now() < busyUntil) {
+            if (phase === "filling" || Date.now() < busyUntil || awayMessage()) {
                 return;
             }
             if (phase === "done") {
@@ -1118,6 +1136,11 @@ TEMPLATE = """\
                 btn.textContent = "Selling…";
                 return;
             }
+            if (awayMessage()) {
+                btn.textContent = awayMessage();
+                panel.style.display = "none";
+                return;
+            }
             var confirming = !!confirmButton();
             renderPanel(ourRows(true), confirming);
             var rows = ourRows();
@@ -1148,7 +1171,7 @@ TEMPLATE = """\
         }
 
         btn.addEventListener("click", function () {
-            if (Date.now() < busyUntil) {
+            if (Date.now() < busyUntil || awayMessage()) {
                 return;
             }
             note = "";

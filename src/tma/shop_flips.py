@@ -121,6 +121,51 @@ def daily_buy_plan(flips: pd.DataFrame, cap: int = DAILY_CAP, backups: int = 5) 
     return out[0], out[1]
 
 
+def shop_values(shop_items: list[dict], ref_prices: dict[int, float]) -> pd.DataFrame:
+    """Every city item valued at Torn's market value (what it has been selling
+    for), best profit per item first. Needs no market calls, so it's cheap
+    enough to recheck every minute."""
+    rows = []
+    for it in shop_items:
+        ref = ref_prices.get(it["item_id"]) or 0
+        if not ref or not it["price"]:
+            continue
+        profit = ref * (1.0 - MARKET_FEE) - it["price"]
+        rows.append({
+            "Item": it["item_name"],
+            "Shop": it["shop"],
+            "In stock": it["stock"],
+            "Buy at": it["price"],
+            "Market value": ref,
+            "Profit / unit": round(profit),
+            "Margin %": round(100.0 * profit / it["price"], 1),
+            "item_id": it["item_id"],
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.sort_values("Profit / unit", ascending=False).reset_index(drop=True)
+
+
+def stock_changes(prev: dict[int, int], shop_items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(changed, restocked) since the last check: items whose stock moved, and
+    those whose stock went up. With no previous check, everything is new and
+    nothing counts as a restock."""
+    changed = [it for it in shop_items if prev.get(it["item_id"]) != it["stock"]]
+    restocked = [it for it in changed if it["item_id"] in prev and it["stock"] > prev[it["item_id"]]]
+    return changed, restocked
+
+
+def restock_times(log: pd.DataFrame, item_ids) -> pd.DataFrame:
+    """Each logged rise in stock for `item_ids`: when, how many, from what."""
+    if log.empty:
+        return pd.DataFrame(columns=["time", "item_name", "shop", "from", "stock"])
+    log = log[log["item_id"].isin(set(int(i) for i in item_ids))].sort_values("time").copy()
+    log["from"] = log.groupby("item_id")["stock"].shift()
+    rises = log[log["from"].notna() & (log["stock"] > log["from"])]
+    return rises[["time", "item_name", "shop", "from", "stock"]].reset_index(drop=True)
+
+
 def log_stock(path: Path, shop_items: list[dict], stamp: str) -> int:
     if not shop_items:
         return 0

@@ -14,7 +14,7 @@ from app.ui.profile_card import loadout_rows
 from tma.profile import away_from_torn, equipped_value, item_image_url, total_money
 import pandas as pd
 
-from tma.shop_flips import daily_buy_plan, log_stock, scan_flips
+from tma.shop_flips import daily_buy_plan, log_stock, restock_times, scan_flips, shop_values, stock_changes
 
 
 class ProfileTest(unittest.TestCase):
@@ -84,6 +84,27 @@ class ShopFlipsTest(unittest.TestCase):
         self.assertTrue(scan_flips(shop, market, {106: 447_588_888}).empty)
         rose = scan_flips(SHOP_ITEMS, MARKET, {1: 900}).iloc[0]
         self.assertEqual((rose["Sell at"], rose["Market value"]), (900, 900))
+
+    def test_shop_values_rank_by_market_value_profit(self):
+        items = [dict(SHOP_ITEMS[0], item_id=180, item_name="Bottle of Beer", price=10.0),
+                 dict(SHOP_ITEMS[1], item_id=2, price=8000.0), dict(SHOP_ITEMS[2], item_id=3)]
+        df = shop_values(items, {180: 923, 2: 53389})  # no market value for 3: left out
+        self.assertEqual(list(df["Item"]), ["Cagoutte", "Bottle of Beer"])
+        self.assertEqual(df.iloc[1]["Profit / unit"], round(923 * 0.95 - 10))
+        self.assertEqual(df.iloc[1]["Margin %"], round(100 * (923 * 0.95 - 10) / 10, 1))
+
+    def test_stock_changes_and_restock_times(self):
+        a = {"shop": "Bits", "item_id": 180, "item_name": "Beer", "price": 10.0, "stock": 0, "default_stock": 5000}
+        changed, restocked = stock_changes({}, [a])
+        self.assertEqual((len(changed), restocked), (1, []))  # first check: logged, not a restock
+        self.assertEqual(stock_changes({180: 0}, [a]), ([], []))
+        changed, restocked = stock_changes({180: 0}, [dict(a, stock=2400)])
+        self.assertEqual([r["stock"] for r in restocked], [2400])
+        log = pd.DataFrame([dict(a, time="t1"), dict(a, time="t2", stock=2400), dict(a, time="t3", stock=900),
+                            dict(a, time="t4", stock=3000), dict(a, item_id=9, time="t2", stock=50)])
+        rises = restock_times(log, [180])
+        self.assertEqual(list(rises["time"]), ["t2", "t4"])
+        self.assertEqual(list(rises["from"]), [0, 900])
 
     def test_daily_plan_fills_the_cap_with_most_profit_per_item_then_backups(self):
         def row(item, per, worth, buy_at=10.0):

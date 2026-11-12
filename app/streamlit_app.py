@@ -23,6 +23,7 @@ from app.ui import autofill_export
 from app.ui.page_progress import PageProgress
 from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
+from app.ui.restock_watch import render_restock_watch
 from app.ui.shop_scan import render_shop_scan
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
@@ -142,6 +143,7 @@ if st.session_state["api_key"]:
             "and listing script stay paused. Running the app still works."
         )
 render_shop_scan(st.session_state["api_key"])
+render_restock_watch(st.session_state["api_key"])
 
 with st.expander("How it works"):
     st.markdown(

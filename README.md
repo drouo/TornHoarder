@@ -105,7 +105,7 @@ Shop-plan items are sold to city shops with one button. **Start shop run →** o
 1. **Review:** the panel under the button lists each item × quantity × price and the total. Click a line to leave it out.
 2. **Sell N item(s) here · $X:** fills only this run's Shop items (weapon/armor copies are matched by their armoryID; on Big Al's it ticks each copy) and opens Torn's *Are you sure?* with the total.
 3. **Confirm: sell …:** confirms that one sale.
-4. **Next: <shop> →:** goes to the next shop, until **Shop run done ✓**.
+4. **Next: <shop> →:** goes to the next shop, until **Shop run done ✓**, which shows what the run sold and goes on to Add Listing.
 
 Each shop page also reports what that shop really buys back to the app (`POST 127.0.0.1:9999/shop-report`, stored in `data/shop_buys.json`). The catalog's vendor is only a guess; Big Al's, for example, buys only a few of the weapons it stocks. Later runs send items only to shops seen buying them, and anything no shop takes falls back to its market plan.
 
@@ -121,7 +121,13 @@ Each shop page also reports what that shop really buys back to the app (`POST 12
    Held back, with the reason shown: Keep items, crime items, your best copies, copies routed to a shop, and anything a price guard stops. The *anonymous (+10% fee)* box is never touched. Click the status box to see every row filled and every row held.
 3. **Add N listing(s) to market · $X:** the total is Torn's own, read from the page. The button presses Torn's ADD TO MARKET, and turns into **Confirm** if Torn asks.
 
-A full plan of about 650 rows across 13 tabs fills in roughly 3½ minutes. **Start over** clears all of Torn's selections.
+A full plan of about 650 rows across 13 tabs fills in roughly 3½ minutes. **Start over** clears all of Torn's selections. Once listed, clicking **Listed ✓** closes the panel.
+
+### The button and panel
+
+On both the shop run and Add Listing, the button and its review list sit in one box with a small bar on top: **◀ / ▣ / ▶** dock it in the left margin, over the page, or in the right margin (remembered in your browser; wide windows start on the right), **–** folds the list away, and **✕** closes it until the page reloads.
+
+While you're traveling or abroad, Torn closes city shops and the Item Market. The script sees that (Torn marks the page) and pauses with a ✈ message instead of walking the shop route, and the app shows a warning under your profile card.
 
 ## Your listings
 
@@ -155,7 +161,13 @@ With a saved API key, the top of the app shows your profile card: avatar, name, 
 
 ## Shop flips
 
-**Shop flips → Scan shops** checks every city shop's current stock (`torn/cityshops`) against live market listings, about 110 API calls. It lists what resells at a profit: $1 under the cheapest listing, after the 5% tax, minus the shop price. **Worth buying** caps the quantity at how many are listed for sale now, roughly what the market can take without sinking the price, and items are ranked by the profit on that many. Profitable items that are sold out are listed separately. Each completed scan logs shop stock to `data/cityshop_stock.csv` so restock times can be learned. Buying is your click on the shop page.
+**Shop flips → Scan shops** checks every city shop's current stock (`torn/cityshops`) against live market listings, about 110 API calls. It lists what resells at a profit: $1 under the cheapest listing, after the 5% tax, minus the shop price. **Worth buying** caps the quantity at how many are listed for sale now, roughly what the market can take without sinking the price, and items are ranked by the profit on that many. Profitable items that are sold out are listed separately. The resale price is never above Torn's market value, what the item has actually been selling for: listings can ask anything (Parachutes list at $480m, sell near $448m, cost $450m in the shop). **Minimum margin %** (default 10%) drops thin flips.
+
+**Today's 100 buys:** Torn allows 100 city-shop items a day across all shops, so the plan fills those 100 with the most profit per item first, then lists **Backups** in case a pick has sold out when you get there. Each completed scan logs shop stock to `data/cityshop_stock.csv` so restock times can be learned. Buying is your click on the shop page.
+
+### Restock watch
+
+The best flips (Bottle of Beer, Cagoutte 10-6, Birthday Wrapping Paper…) are almost always sold out: players buy them within minutes of a restock. Turn on **Watch shop stock** and the app checks city shop stock once a minute (1 API call) while the page is open, valuing each item at Torn's market value after tax. When a watched item (by default $500+ profit each and a 10%+ margin) comes back in stock you get a toast, a chime, and a link to the shop. Only stock changes are logged, and **Restocks seen** lists every logged restock so a schedule shows up over a day or two.
 
 Money is shown short throughout the app ($950, $1.2k, $15.6m, $2.95b); quantities stay exact.
 

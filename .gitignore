@@ -33,3 +33,12 @@ data/museum_sets.json
 
 # City shop stock, logged by each Scan shops
 data/cityshop_stock.csv
+
+# Foreign shop stock from YATA, logged by tools/log_foreign_stock.py
+data/foreign_stock.csv
+data/foreign_updates.csv
+
+# Keep-stocked status served to the userscript badge
+data/stock_status.json
+data/foreign_logger.log
+data/foreign_logger.err

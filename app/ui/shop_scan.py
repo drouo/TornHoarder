@@ -15,6 +15,7 @@ from tma.shop_flips import DAILY_CAP, daily_buy_plan, fetch_city_shops, log_stoc
 
 from .. import paths
 from .page_progress import PageProgress
+from tma.shops import buy_url
 
 
 def render_shop_scan(api_key: str) -> None:
@@ -90,6 +91,13 @@ def render_shop_scan(api_key: str) -> None:
             plan_cfg = {**cfg, "Buy": st.column_config.NumberColumn(format="localized")}
             plan_cols = ("Item", "Shop", "Buy", "Buy at", "Sell at", "Profit / unit", "Margin %", "Profit", "Cost", "In stock")
             st.dataframe(buys, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)
+            links = []
+            for shop, grp in buys.groupby("Shop", sort=False):
+                url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
+                what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
+                links.append(f"[**{shop}: buy {what} →**]({url})" if url else f"{shop}: {what} (buy by hand)")
+            st.markdown("  \n".join(links).replace("$", "\\$"))
+            st.caption("Each link opens the shop with the userscript ready to fill the amounts; you click Buy and confirm.")
             if not spare.empty:
                 st.markdown("**Backups**, if a pick has sold out when you get there:")
                 st.dataframe(spare, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)

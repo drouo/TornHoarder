@@ -25,6 +25,7 @@ from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
 from app.ui.restock_watch import render_restock_watch
 from app.ui.shop_scan import render_shop_scan
+from app.ui.stock_minimums import render_keep_stocked
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
 from tma import http_client, museum, my_listings, profile
@@ -142,6 +143,7 @@ if st.session_state["api_key"]:
             f"✈ {_away}. City shops and the Item Market are closed until you're back in Torn, so the shop run "
             "and listing script stay paused. Running the app still works."
         )
+    render_keep_stocked(st.session_state["api_key"], profile_bundle)
 render_shop_scan(st.session_state["api_key"])
 render_restock_watch(st.session_state["api_key"])
 

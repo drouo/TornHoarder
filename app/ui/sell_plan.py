@@ -16,7 +16,8 @@ import streamlit as st
 
 from dataclasses import replace
 
-from tma.config import load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
+from tma.config import load_minimums, load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
+from tma.stock_minimums import as_reserves
 from tma.crime_items import load_oc_items
 from tma.fmt import money
 from tma.inventory import inventory_category_for_profile
@@ -306,6 +307,19 @@ def _render_rules(saved: dict) -> SellRules:
             default=list(base.keep_one_categories),
             key="rule_keep_one",
         )
+        st.markdown("**After selling** (offered by the userscript when a shop run or listing finishes)")
+        a1, a2 = st.columns(2)
+        with a1:
+            keep_cash = st.number_input(
+                "Cash to keep on hand ($)", 0, None, int(base.keep_cash), 1_000_000, key="rule_keep_cash",
+                help="Deposit offers bank everything above this, read from your wallet at the moment you click. "
+                "Nothing is offered when your wallet is at or below it.",
+            )
+        with a2:
+            ipecac_over = st.number_input(
+                "Offer Ipecac Syrup after selling or listing at least ($)", 0, None, int(base.ipecac_over), 1_000_000,
+                key="rule_ipecac_over", help="Ipecac puts you in hospital for 60–90 minutes, where nobody can mug you. 0 = never offer.",
+            )
         st.caption(
             f"Market proceeds are after Torn's {MARKET_FEE:.0%} item-market sales tax. Dump/Competitive items switch "
             "to **Shop** automatically when a city shop pays at least that much. OC items come from Torn's "
@@ -324,6 +338,8 @@ def _render_rules(saved: dict) -> SellRules:
         oc_tool_keep=int(oc_tool),
         oc_consumable_keep=int(oc_used),
         crime_hint_keep=int(hint),
+        keep_cash=float(keep_cash),
+        ipecac_over=float(ipecac_over),
     )
 
 
@@ -336,9 +352,13 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     known = load_shop_knowledge(SHOP_BUYS_PATH)
     oc_items = load_oc_items(OC_ITEMS_PATH)
     reserves = load_reserves()
+    # Keep-stocked minimums are never sold below; a higher hand-set reserve wins.
+    effective = dict(reserves)
+    for iid, n in as_reserves(load_minimums()).items():
+        effective[iid] = max(effective.get(iid, 0), n)
     museum_sets = museum_table(ctx["rows_out"], summary_by_id, profiles, an.get("museum") or {})
     rows = plan_rows(
-        ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, reserves,
+        ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, effective,
         museum_holds(museum_sets),
     )
     # data_editor stores edits by row position, so the order must not depend

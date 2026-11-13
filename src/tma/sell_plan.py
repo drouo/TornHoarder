@@ -85,6 +85,10 @@ class SellRules:
     # Price history: every item in these categories gets a row each run,
     # owned or not (one extra market call per unowned item).
     history_categories: tuple[str, ...] = ()
+    # After selling: deposit offers leave keep_cash in the wallet; Ipecac is
+    # offered once a shop run or listing batch reaches ipecac_over (0 = never).
+    keep_cash: float = 0.0
+    ipecac_over: float = 5_000_000.0
 
     def to_dict(self) -> dict:
         d = asdict(self)

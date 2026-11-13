@@ -26,9 +26,21 @@ SCRIPT_NAME = "tornhoarder.user.js"
 MAX_REPORT_BYTES = 200_000
 
 
-def _make_handler(script_path: Path, reports_path: Optional[Path]) -> type[http.server.BaseHTTPRequestHandler]:
+def _make_handler(
+    script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None
+) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
+            if self.path == "/stock-status":
+                # The app's latest Keep-stocked check, for the userscript's badge.
+                body = status_path.read_bytes() if status_path and status_path.exists() else b'{"checked": 0, "short": []}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-cache, max-age=0")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if not script_path.exists():
                 self.send_error(404, "script not yet generated")
                 return
@@ -69,7 +81,8 @@ def _make_handler(script_path: Path, reports_path: Optional[Path]) -> type[http.
 
 
 def build_server(
-    script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None
+    script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None,
+    status_path: Optional[Path] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
-    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path))
+    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path))

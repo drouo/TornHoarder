@@ -129,8 +129,8 @@ class UserscriptShopTest(unittest.TestCase):
     def test_embeds_shop_run_and_matches_shop_pages(self):
         run = build_shop_run([{"item_id": 1483, "qty": 2, "uid": None, "is_stat": False, "price": 9000}], PROFILES)
         out = build_userscript({}, {}, shop_run=run)
-        self.assertIn("// @match        https://www.torn.com/shops.php*", out)
-        self.assertIn("// @match        https://www.torn.com/bigalgunshop.php*", out)
+        # One match for all of Torn: the Keep-stocked badge shows on every page.
+        self.assertIn("// @match        https://www.torn.com/*", out)
         self.assertIn("// @grant        GM_xmlhttpRequest", out)
         self.assertIn('"reportUrl": "http://127.0.0.1:9999/shop-report"', out)
         start = out.index("var SHOP = ") + len("var SHOP = ")

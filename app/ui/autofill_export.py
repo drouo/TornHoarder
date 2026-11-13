@@ -4,6 +4,7 @@ that fills prices directly on Torn's Add Listing page.
 
 from __future__ import annotations
 
+import json
 import threading
 
 import pandas as pd
@@ -13,7 +14,8 @@ from tma.autoupdate_server import DEFAULT_PORT, build_server
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
 from tma.userscript import build_userscript
 
-from ..paths import AUTOFILL_PATH, SHOP_BUYS_PATH
+from ..paths import AUTOFILL_PATH, SHOP_BUYS_PATH, STOCK_STATUS_PATH
+from .stock_minimums import status_json
 
 
 @st.cache_resource
@@ -25,7 +27,7 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
     """
     url = f"http://127.0.0.1:{port}/{AUTOFILL_PATH.name}"
     try:
-        server = build_server(AUTOFILL_PATH, port=port, reports_path=SHOP_BUYS_PATH)
+        server = build_server(AUTOFILL_PATH, port=port, reports_path=SHOP_BUYS_PATH, status_path=STOCK_STATUS_PATH)
     except OSError:
         # Port already bound — most likely this same server from a prior process
         # (e.g. `tools/update_server.py` run by hand), so the URL is still live.
@@ -75,8 +77,10 @@ def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
     userjs = build_userscript(
         price_map,
         base_stats_map(profiles),
-        cfg={"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality},
+        cfg={"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality,
+             "keepCash": rules.keep_cash, "ipecacOver": rules.ipecac_over},
         shop_run=plan_ctx.get("shop_run"),
+        stock=json.loads(status_json()),
     )
     write_ok = True
     try:

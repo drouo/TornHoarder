@@ -42,6 +42,23 @@ VENDOR_STEPS = {
     "TC Clothing": "clothes",
 }
 
+# torn/cityshops names a few shops differently from VENDOR_STEPS.
+SHOP_ALIASES = {"Print Store": "Print Shop"}
+
+
+def shop_url(shop: str) -> Optional[str]:
+    step = VENDOR_STEPS.get(SHOP_ALIASES.get(shop, shop))
+    return (OWN_PAGE_URLS.get(step) or SHOP_URL.format(step=step)) if step else None
+
+
+def buy_url(shop: str, qty_by_id: dict) -> Optional[str]:
+    """The shop page with what to buy attached, for the userscript's buy mode."""
+    url = shop_url(shop)
+    if not url or not qty_by_id:
+        return url
+    spec = ",".join(f"{int(i)}:{int(q)}" for i, q in qty_by_id.items() if q > 0)
+    return f"{url}{'&' if '?' in url else '?'}thbuy={spec}"
+
 
 STEP_NAMES = {step: name for name, step in VENDOR_STEPS.items()}
 

@@ -53,3 +53,14 @@ def save_reserves(reserves: dict[int, int]) -> None:
     cfg = load_config()
     cfg["reserves"] = {str(k): int(v) for k, v in sorted(reserves.items())}
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def load_minimums() -> dict[str, int]:
+    """{"item:<id>" or "ammo:primary"/"ammo:secondary": minimum} to keep stocked."""
+    return {str(k): int(v) for k, v in (load_config().get("stock_minimums") or {}).items()}
+
+
+def save_minimums(minimums: dict[str, int]) -> None:
+    cfg = load_config()
+    cfg["stock_minimums"] = {k: int(v) for k, v in sorted(minimums.items()) if int(v) > 0}
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")

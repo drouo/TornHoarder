@@ -11,8 +11,8 @@ import streamlit.components.v1 as components
 from tma.fmt import money
 from tma.http_client import session_for_requests, shared_bucket
 from tma.item_stats import load_profiles
-from tma.shop_flips import fetch_city_shops, log_stock, restock_times, shop_values, stock_changes
-from tma.shops import OWN_PAGE_URLS, SHOP_URL, VENDOR_STEPS
+from tma.shop_flips import DAILY_CAP, fetch_city_shops, log_stock, restock_times, shop_values, stock_changes
+from tma.shops import buy_url, shop_url
 
 from .. import paths
 
@@ -28,15 +28,6 @@ try {
   });
 } catch (e) {}
 </script>"""
-
-
-# torn/cityshops names a few shops differently from the shop list in tma.shops.
-_ALIASES = {"Print Store": "Print Shop"}
-
-
-def shop_url(shop: str) -> str | None:
-    step = VENDOR_STEPS.get(_ALIASES.get(shop, shop))
-    return (OWN_PAGE_URLS.get(step) or SHOP_URL.format(step=step)) if step else None
 
 
 def render_restock_watch(api_key: str) -> None:
@@ -77,7 +68,7 @@ def _watch(api_key: str, min_profit: float, min_margin: float) -> None:
     for it in hits:
         row = watched[watched["item_id"] == it["item_id"]].iloc[0]
         msg = f"{it['item_name']}: {it['stock']:,} in stock at {it['shop']} · {money(row['Profit / unit'])} profit each"
-        alerts.insert(0, {"time": stamp[11:16], "msg": msg, "url": shop_url(it["shop"])})
+        alerts.insert(0, {"time": stamp[11:16], "msg": msg, "url": buy_url(it["shop"], {it["item_id"]: min(it["stock"], DAILY_CAP)})})
         st.toast("🔔 " + msg)
     del alerts[20:]
     if hits:
@@ -103,7 +94,7 @@ def _table(watched: pd.DataFrame) -> None:
         st.info("No city-shop item clears those thresholds.")
         return
     df = watched.copy()
-    df["Shop page"] = df["Shop"].map(shop_url)
+    df["Shop page"] = [buy_url(s, {i: min(n, DAILY_CAP)} if n > 0 else {}) for s, i, n in zip(df["Shop"], df["item_id"], df["In stock"])]
     st.dataframe(
         df, width="stretch", hide_index=True,
         column_order=("Item", "Shop", "In stock", "Buy at", "Market value", "Profit / unit", "Margin %", "Shop page"),

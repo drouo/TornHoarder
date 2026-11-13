@@ -12,9 +12,7 @@ TEMPLATE = """\
 // @namespace    tornhoarder
 // @version      __VERSION__
 // @description  TornHoarder: fills Add Listing prices from your sell plan and runs one-button city shop sales.
-// @match        https://www.torn.com/page.php?sid=ItemMarket*
-// @match        https://www.torn.com/shops.php*
-// @match        https://www.torn.com/bigalgunshop.php*
+// @match        https://www.torn.com/*
 // @updateURL    http://127.0.0.1:9999/tornhoarder.user.js
 // @downloadURL  http://127.0.0.1:9999/tornhoarder.user.js
 // @run-at       document-idle
@@ -29,6 +27,7 @@ TEMPLATE = """\
     var BASE_STATS = __BASE_STATS__;
     var CFG = __CFG__;
     var SHOP = __SHOP__;
+    var STOCK = __STOCK__;
 
     Object.keys(PRICE_MAP).forEach(function (itemId) {
         PRICE_MAP[itemId].fast = Number(PRICE_MAP[itemId].fast);
@@ -190,6 +189,49 @@ TEMPLATE = """\
                 }
             }
         };
+    }
+
+    // ---- After selling: bank the cash, optionally hide in hospital ----------
+    var DONATE_URL = "https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=donate";
+    var MEDICAL_URL = "https://www.torn.com/item.php#medical-items";
+    var IPECAC_ID = "1363";
+    var IPECAC_KEY = "tornhoarder.ipecac";   // set when you choose Ipecac, read on the items page
+    var IPECAC_FRESH_MS = 15 * 60 * 1000;
+
+    // The wallet as Torn's sidebar shows it right now.
+    function walletNow() {
+        var el = document.querySelector("#user-money");
+        var n = el ? parseInt(el.getAttribute("data-money"), 10) : NaN;
+        return isNaN(n) ? null : n;
+    }
+
+    // Everything above the cash you keep on hand; 0 when there's nothing to bank.
+    function depositAmount(wallet) {
+        return wallet == null ? 0 : Math.max(wallet - (Number(CFG.keepCash) || 0), 0);
+    }
+
+    // Deposit and Ipecac offers for the end of a shop run or listing.
+    // `value` is what was just sold or listed.
+    function afterLinks(panelEl, value) {
+        var amount = depositAmount(walletNow());
+        var link = function (text, onClick) {
+            var div = document.createElement("div");
+            div.textContent = text;
+            div.style.cssText = "color:#64b5f6;text-decoration:underline;cursor:pointer;margin-top:6px;";
+            div.addEventListener("click", onClick);
+            panelEl.appendChild(div);
+        };
+        if (amount > 0) {
+            link("Deposit " + fmtMoney(amount) + " to the faction vault (keeping " + fmtMoney(Number(CFG.keepCash) || 0) + ") →", function () {
+                location.href = DONATE_URL;
+            });
+        }
+        if (Number(CFG.ipecacOver) > 0 && value >= Number(CFG.ipecacOver)) {
+            link("Take Ipecac Syrup: hospital for 60–90 min so nobody can mug you while it sells →", function () {
+                writePref(IPECAC_KEY, String(Date.now()));
+                location.href = MEDICAL_URL;
+            });
+        }
     }
 
     // Set a field the way typing would, so the page's own code sees the change.
@@ -374,6 +416,7 @@ TEMPLATE = """\
         var busyUntil = 0;
         var panelSig = "";
         var progress = 0;
+        var listedValue = 0;       // Torn's total for the batch you added, for the Ipecac offer
 
         var btn = document.createElement("button");
         btn.id = "th-list-btn";
@@ -783,6 +826,10 @@ TEMPLATE = """\
                 }
                 line("Start over (clears Torn's selections)", "color:#64b5f6;margin-top:6px;text-decoration:underline;", startOver);
             }
+            if (phase === "done") {
+                line("Listed " + fmtMoney(listedValue) + ".", "color:#9ccc65;margin-top:6px;");
+                afterLinks(panel, listedValue);
+            }
             panel.scrollTop = keepTop;
         }
 
@@ -864,6 +911,7 @@ TEMPLATE = """\
             var add = addButton();
             if (phase === "filled" && totals && totals.items > 0 && add && !add.disabled) {
                 phase = "adding";
+                listedValue = totals.total;
                 busyUntil = Date.now() + 2500;
                 add.click();
                 render();
@@ -992,6 +1040,7 @@ TEMPLATE = """\
             panel.appendChild(head);
             if (!run.sold.length) {
                 head.textContent = "Shop run finished. No sales were confirmed with this button, so there is nothing to total.";
+                afterLinks(panel, 0);
                 return;
             }
             var byShop = {};
@@ -1025,6 +1074,7 @@ TEMPLATE = """\
             tip.style.cssText = "color:#bbb;margin-top:6px;";
             tip.textContent = "Next: list everything else on the Item Market (the button above). Run the app again first if you want its plan to drop what you just sold.";
             panel.appendChild(tip);
+            afterLinks(panel, soldTotal(run));
         }
 
         function ourRows(includeExcluded) {
@@ -1252,7 +1302,765 @@ TEMPLATE = """\
         console.log("[TornHoarder] shop run v" + VER + ": " + route.length + " shop(s) on route");
     }
 
+    // ---- Shared by the deposit, Ipecac and buy modes -----------------------
+    function greenButton(id) {
+        var b = document.createElement("button");
+        b.id = id;
+        b.type = "button";
+        labelCopy(b);
+        b.style.cssText =
+            "width:100%;box-sizing:border-box;padding:14px 22px;border-radius:8px;border:2px solid #2e7d32;" +
+            "background:#43a047;color:#fff;font:bold 16px/1.2 Arial,sans-serif;cursor:pointer;" +
+            "box-shadow:0 4px 14px rgba(0,0,0,.5);";
+        return b;
+    }
+
+    function infoPanel() {
+        var p = document.createElement("div");
+        p.style.cssText = "box-sizing:border-box;overflow:auto;padding:8px 12px;border-radius:8px;" +
+            "background:rgba(0,0,0,.9);border:1px solid #2e7d32;color:#eee;font:13px/1.5 Arial,sans-serif;";
+        return p;
+    }
+
+    function setLines(panelEl, lines) {
+        var sig = lines.join(NL);
+        if (panelEl.getAttribute("data-sig") === sig) {
+            return;
+        }
+        panelEl.setAttribute("data-sig", sig);
+        panelEl.textContent = "";
+        lines.forEach(function (t) {
+            var div = document.createElement("div");
+            div.textContent = t;
+            panelEl.appendChild(div);
+        });
+    }
+
+    // Torn's "Are you sure…? Yes / No" prompt, found by its wording.
+    function findConfirm(scope) {
+        var all = (scope || document).querySelectorAll("button, a, input[type=button], input[type=submit]");
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (el.offsetParent === null || el.closest("#th-dock")) {
+                continue;
+            }
+            if (!/^(yes|confirm)$/i.test((el.textContent || el.value || "").trim())) {
+                continue;
+            }
+            var box = el;
+            for (var up = 0; up < 6 && box && !/are you sure/i.test(box.textContent || ""); up++) {
+                box = box.parentElement;
+            }
+            if (box && /are you sure/i.test(box.textContent || "")) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    // Torn's money boxes: a visible formatted field plus a hidden twin.
+    function setMoney(visible, hidden, n) {
+        visible.value = String(n);
+        ["input", "keyup", "change"].forEach(function (ev) {
+            visible.dispatchEvent(new Event(ev, { bubbles: true }));
+        });
+        if (hidden) {
+            hidden.value = String(n);
+        }
+    }
+
+    function usable(b) {
+        return b && !b.disabled && !/\\bdisabled\\b/.test(b.className || "");
+    }
+
+    // ---- Faction vault: deposit everything above what you keep -------------
+    // Click 1 fills DEPOSIT MONEY's amount (wallet minus keepCash, read live)
+    // and presses it; click 2 confirms if Torn asks.
+    function depositMode() {
+        var btn = greenButton("th-deposit-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+        var busyUntil = 0;
+        var note = "";
+
+        function form() {
+            var boxes = document.querySelectorAll("div.donate");
+            for (var i = 0; i < boxes.length; i++) {
+                var go = Array.prototype.filter.call(boxes[i].querySelectorAll("button"), function (b) {
+                    return /deposit money/i.test(b.textContent || "");
+                })[0];
+                var input = boxes[i].querySelector("input.input-money:not([type=hidden])");
+                if (go && input && input.offsetParent !== null) {
+                    return { go: go, input: input, hidden: boxes[i].querySelector("input.input-money[type=hidden]") };
+                }
+            }
+            return null;
+        }
+
+        function render() {
+            var f = form();
+            var c = findConfirm();
+            dock.show(!!(f || c));
+            if (!f && !c) {
+                return;
+            }
+            var wallet = walletNow();
+            var amount = depositAmount(wallet);
+            var keep = Number(CFG.keepCash) || 0;
+            setLines(panel, [
+                "Wallet " + (wallet == null ? "?" : fmtMoney(wallet)) + " · keeping " + fmtMoney(keep) +
+                    " (set under Rules in the app) · deposit " + fmtMoney(amount),
+                "Faction vault money can be taken back by your faction's leadership, not by muggers."
+            ]);
+            if (Date.now() < busyUntil) {
+                btn.textContent = "Depositing…";
+            } else if (c) {
+                btn.textContent = "Confirm: deposit " + fmtMoney(amount);
+            } else if (amount <= 0) {
+                btn.textContent = "Nothing to deposit: wallet is within your " + fmtMoney(keep) + " keep";
+            } else {
+                btn.textContent = "Deposit " + fmtMoney(amount) + " to the faction vault";
+            }
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            note = "";
+            var c = findConfirm();
+            if (c) {
+                busyUntil = Date.now() + 2500;
+                c.click();
+                render();
+                return;
+            }
+            var f = form();
+            var amount = depositAmount(walletNow());
+            if (!f || amount <= 0) {
+                return;
+            }
+            setMoney(f.input, f.hidden, amount);
+            busyUntil = Date.now() + 600;
+            // Torn enables DEPOSIT MONEY once it has seen the amount.
+            setTimeout(function () {
+                var again = form();
+                if (again && usable(again.go)) {
+                    again.go.click();
+                } else {
+                    note = "amount filled, press DEPOSIT MONEY yourself";
+                }
+                render();
+            }, 400);
+            render();
+        });
+
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] deposit mode v" + VER);
+    }
+
+    // ---- Items page: take the Ipecac Syrup you chose to take ---------------
+    // Only shows up within 15 minutes of choosing it at the end of a run.
+    function ipecacMode() {
+        var asked = Number(readPref(IPECAC_KEY, "0"));
+        if (!asked || Date.now() - asked > IPECAC_FRESH_MS) {
+            return;
+        }
+        var btn = greenButton("th-ipecac-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+        var taken = false;
+        var busyUntil = 0;
+
+        function row() {
+            return document.querySelector('li[data-item="' + IPECAC_ID + '"]');
+        }
+
+        function render() {
+            var r = row();
+            var qty = r ? parseInt(r.getAttribute("data-qty"), 10) || 0 : 0;
+            setLines(panel, [
+                "Ipecac Syrup puts you in hospital for 60–90 minutes and adds 30 minutes of medical cooldown.",
+                "Nobody can attack or mug you in hospital, so what sells meanwhile stays safe."
+            ]);
+            if (taken) {
+                btn.textContent = "Ipecac taken ✓ (click to close)";
+            } else if (Date.now() < busyUntil) {
+                btn.textContent = "Using…";
+            } else if (r && findConfirm(r)) {
+                btn.textContent = "Confirm: use Ipecac Syrup";
+            } else if (r) {
+                btn.textContent = "Use Ipecac Syrup (" + qty + " left)";
+            } else if (!/medical-items/.test(location.hash)) {
+                btn.textContent = "Open your Medical items";
+            } else {
+                btn.textContent = "No Ipecac Syrup here: buy one on the Item Market →";
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            if (taken) {
+                dock.close();
+                return;
+            }
+            var r = row();
+            var c = r && findConfirm(r);
+            if (c) {
+                c.click();
+                taken = true;
+                writePref(IPECAC_KEY, "");
+            } else if (r) {
+                var use = r.querySelector('li[data-action="use"]');
+                if (use) {
+                    busyUntil = Date.now() + 1200;
+                    use.click();
+                }
+            } else if (!/medical-items/.test(location.hash)) {
+                location.hash = "#medical-items";
+            } else {
+                location.href = "https://www.torn.com/page.php?sid=ItemMarket#/market/view=search&itemID=" + IPECAC_ID;
+            }
+            render();
+        });
+
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] ipecac mode v" + VER);
+    }
+
+    // ---- What the buy modes have bought, per item, for a day ---------------
+    // A purchase is counted the moment the script fills its amount and presses
+    // BUY, whoever confirms it: Torn's confirm can't be relied on to be
+    // recognised, and counting late is what let a restock keep buying. A
+    // cancelled buy is then under-counted, which errs on buying too few.
+    // Links carry when the app last checked stock (thchk / 4th field), so
+    // only purchases since then count against that shortfall, across reloads.
+    var BOUGHT_KEY = "tornhoarder.bought";
+    var DAY_MS = 24 * 60 * 60 * 1000;
+
+    function boughtLog() {
+        try {
+            return JSON.parse(localStorage.getItem(BOUGHT_KEY) || "{}") || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function recordBought(id, qty) {
+        var log = boughtLog();
+        var now = Date.now();
+        Object.keys(log).forEach(function (k) {
+            log[k] = (log[k] || []).filter(function (x) { return now - x[0] < DAY_MS; });
+        });
+        (log[id] = log[id] || []).push([now, qty]);
+        writePref(BOUGHT_KEY, JSON.stringify(log));
+    }
+
+    function boughtSince(id, sinceMs) {
+        return (boughtLog()[id] || []).reduce(function (n, x) {
+            return x[0] > sinceMs ? n + x[1] : n;
+        }, 0);
+    }
+
+    // ---- City shop: buy what the app picked --------------------------------
+    // The app links here with &thbuy=<id>:<qty>,... Click 1 fills one item's
+    // amount and presses its BUY; click 2 confirms. One item per purchase.
+    function buyMode(spec, checkedSec) {
+        var since = (Number(checkedSec) || 0) * 1000;
+        var want = {};
+        spec.split(",").forEach(function (part) {
+            var a = part.split(":");
+            if (a[0] && Number(a[1]) > 0) {
+                want[a[0]] = Number(a[1]);
+            }
+        });
+        var pending = null;
+        var busyUntil = 0;
+        var note = "";
+        var btn = greenButton("th-buy-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+
+        function rows() {
+            return Object.keys(want).map(function (id) {
+                var input = document.querySelector('input[name="buyAmount[]"][id="' + id + '"]');
+                var nameEl = document.getElementById(id + "-name");
+                var stockEl = document.getElementById(id + "-stock");
+                var priceEl = document.getElementById(id + "-price");
+                var stock = stockEl ? parseInt((stockEl.textContent.match(/([0-9,]+)\\s*in stock/) || [0, (stockEl.textContent.match(/[0-9,]+/) || ["0"])[0]])[1].replace(/,/g, ""), 10) || 0 : 0;
+                var price = priceEl ? parseInt(((priceEl.textContent.match(/\\$\\s*([0-9,]+)/) || [0, "0"])[1]).replace(/,/g, ""), 10) || 0 : 0;
+                var left = Math.max(want[id] - boughtSince(id, since), 0);
+                return {
+                    id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, input: input,
+                    stock: stock, price: price, qty: Math.min(left, stock), left: left
+                };
+            });
+        }
+
+        function render() {
+            if (awayMessage()) {
+                btn.textContent = awayMessage();
+                return;
+            }
+            var all = rows();
+            setLines(panel, ["Buying for resale (Torn allows 100 city-shop items a day, all shops together):"].concat(
+                all.map(function (r) {
+                    var got = boughtSince(r.id, since);
+                    return (r.left === 0 ? "✓ " : "· ") + r.name + ": " + got + " of " + want[r.id] + " bought" +
+                        (r.left && !r.input ? " (not in stock here now)" : r.left ? " · " + r.stock.toLocaleString("en-US") + " in stock" : "");
+                })));
+            var c = findConfirm();
+            var next = all.filter(function (r) { return r.qty > 0 && r.input; })[0];
+            if (Date.now() < busyUntil) {
+                btn.textContent = "Buying…";
+            } else if (c && pending) {
+                btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.name + (pending.price ? " · " + fmtMoney(pending.qty * pending.price) : "");
+            } else if (next) {
+                btn.textContent = "Buy " + next.qty + " × " + next.name + (next.price ? " · " + fmtMoney(next.qty * next.price) : "");
+            } else {
+                btn.textContent = all.some(function (r) { return r.left > 0; })
+                    ? doneLabel("Nothing left to buy in stock here") : doneLabel("Bought ✓");
+            }
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil || awayMessage()) {
+                return;
+            }
+            note = "";
+            var c = findConfirm();
+            if (c && pending) {
+                pending = null;
+                busyUntil = Date.now() + 2000;
+                c.click();
+                render();
+                return;
+            }
+            var next = rows().filter(function (r) { return r.qty > 0 && r.input; })[0];
+            if (!next) {
+                finishStop(dock);
+                return;
+            }
+            var item = document.querySelector('span.item[itemid="' + next.id + '"]');
+            var reveal = item && item.querySelector("button.buy-info");
+            if (reveal) {
+                reveal.click();   // opens the amount box
+            }
+            setField(next.input, next.qty);
+            recordBought(next.id, next.qty);
+            var wrap = next.input.closest(".buy-act-wrap") || next.input.parentElement;
+            var buy = wrap && wrap.querySelector(".buy-act button");
+            pending = next;
+            if (!usable(buy)) {
+                note = "amount filled, press BUY yourself";
+                render();
+                return;
+            }
+            busyUntil = Date.now() + 800;
+            buy.click();
+            render();
+        });
+
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] buy mode v" + VER + ": " + Object.keys(want).length + " item(s)");
+    }
+
+    // ---- Keep stocked: restock run ------------------------------------------
+    // One trip through every stop the app's check lists (each shop, each Item
+    // Market item, the ammo page), like the shop run: when a stop is done its
+    // button becomes "Next: … →". State lives in this browser for 2 hours.
+    var RESTOCK_KEY = "tornhoarder.restockRun";
+    var RESTOCK_TTL_MS = 2 * 60 * 60 * 1000;
+
+    function restockRun() {
+        try {
+            var r = JSON.parse(localStorage.getItem(RESTOCK_KEY) || "null");
+            return r && r.stops && r.stops.length && Date.now() - r.started < RESTOCK_TTL_MS ? r : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function startRestock(route) {
+        if (!route || !route.length) {
+            return false;
+        }
+        writePref(RESTOCK_KEY, JSON.stringify({ stops: route, i: 0, started: Date.now() }));
+        location.href = route[0].url;
+        return true;
+    }
+
+    // A finished stop's button: where the next click goes.
+    function doneLabel(base) {
+        var r = restockRun();
+        if (!r) {
+            return base + " (click to close)";
+        }
+        var nxt = r.stops[r.i + 1];
+        return base + (nxt ? " · Next: " + nxt.label + " →" : " · Restock run done ✓ (click to close)");
+    }
+
+    function finishStop(dock) {
+        var r = restockRun();
+        if (!r || r.i + 1 >= r.stops.length) {
+            try {
+                localStorage.removeItem(RESTOCK_KEY);
+            } catch (e) { /* storage blocked */ }
+            dock.close();
+            return;
+        }
+        r.i += 1;
+        writePref(RESTOCK_KEY, JSON.stringify(r));
+        location.href = r.stops[r.i].url;
+    }
+
+    // ---- Keep stocked: badge on every Torn page -----------------------------
+    // Shows what's below its minimum, from the app's latest check (fetched
+    // live from the app, else as of when this script was built).
+    function stockBadge() {
+        var status = STOCK;
+        var open = false;
+        var pill = document.createElement("div");
+        pill.id = "th-stock-badge";
+        pill.style.cssText = "position:fixed;left:12px;bottom:56px;z-index:999997;max-width:360px;padding:6px 12px;" +
+            "border-radius:16px;background:rgba(183,28,28,.92);color:#fff;font:bold 13px/1.4 Arial,sans-serif;" +
+            "cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.5);display:none;";
+        document.body.appendChild(pill);
+        pill.addEventListener("click", function (ev) {
+            if (ev.target && ev.target.tagName === "A") {
+                return;
+            }
+            open = !open;
+            draw();
+        });
+
+        function draw() {
+            var short = (status && status.short) || [];
+            pill.style.display = short.length ? "block" : "none";
+            if (!short.length) {
+                return;
+            }
+            pill.textContent = "";
+            var head = document.createElement("div");
+            head.textContent = "⚠ " + short.length + " item(s) below minimum " + (open ? "▾" : "▸");
+            pill.appendChild(head);
+            if (!open) {
+                return;
+            }
+            short.forEach(function (s) {
+                var line = document.createElement("div");
+                line.style.cssText = "font-weight:normal;margin-top:4px;";
+                line.appendChild(document.createTextNode(s.name + ": " + s.have + " of " + s.min + " "));
+                if (s.url) {
+                    var a = document.createElement("a");
+                    a.href = s.url;
+                    a.textContent = "buy " + s.need + " →";
+                    a.style.cssText = "color:#ffeb3b;";
+                    line.appendChild(a);
+                }
+                pill.appendChild(line);
+            });
+            var route = status.route || [];
+            if (route.length) {
+                var all = document.createElement("div");
+                all.textContent = "Restock all: " + route.length + " stop(s) →";
+                all.style.cssText = "color:#ffeb3b;text-decoration:underline;margin-top:6px;";
+                all.addEventListener("click", function (ev) {
+                    ev.stopPropagation();
+                    startRestock(route);
+                });
+                pill.appendChild(all);
+            }
+            var age = status.checked ? Math.round((Date.now() / 1000 - status.checked) / 60) : null;
+            var foot = document.createElement("div");
+            foot.style.cssText = "font-weight:normal;opacity:.8;margin-top:4px;";
+            foot.textContent = age == null ? "" : "Checked " + age + " min ago by the app (Keep stocked → Check now).";
+            pill.appendChild(foot);
+        }
+
+        function refresh() {
+            if (typeof GM_xmlhttpRequest === "undefined") {
+                return;
+            }
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, "stock-status"),
+                onload: function (res) {
+                    try {
+                        status = JSON.parse(res.responseText);
+                        draw();
+                    } catch (e) { /* keep what we have */ }
+                }
+            });
+        }
+        draw();
+        refresh();
+        setInterval(refresh, 120000);
+    }
+
+    // ---- Item Market: buy back up to a minimum -----------------------------
+    // From the Keep-stocked link: &thneed=<id>:<need>:<max price>. Click 1
+    // fills the cheapest listing at or under the cap; click 2 confirms.
+    function marketBuyMode(spec) {
+        var a = spec.split(":");
+        var id = a[0];
+        var need = Number(a[1]) || 0;
+        var cap = Number(a[2]) || Infinity;
+        var since = (Number(a[3]) || 0) * 1000;
+        var bought = function () { return boughtSince(id, since); };
+        var pending = null;
+        var busyUntil = 0;
+        var note = "";
+        var btn = greenButton("th-restock-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+
+        function sellers() {
+            var out = [];
+            var rows = document.querySelectorAll("ul[class*=sellerList] li[class*=rowWrapper]");
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var input = r.querySelector("input.input-money:not([type=hidden])");
+                var priceEl = r.querySelector("[class*=price]");
+                var availEl = r.querySelector("[class*=available]");
+                if (!input || !priceEl) {
+                    continue;
+                }
+                out.push({
+                    input: input,
+                    hidden: r.querySelector("input.input-money[type=hidden]"),
+                    buy: r.querySelector("button[class*=buyButton]"),
+                    price: parseInt((priceEl.textContent || "").replace(/[^0-9]/g, ""), 10) || 0,
+                    avail: parseInt((availEl ? availEl.textContent : "1").replace(/[^0-9]/g, ""), 10) || 0,
+                    name: (input.getAttribute("aria-label") || "").replace(/ amount$/i, "") || "item"
+                });
+            }
+            return out.sort(function (x, y) { return x.price - y.price; });
+        }
+
+        function render() {
+            var left = Math.max(need - bought(), 0);
+            var all = sellers();
+            var next = all.filter(function (s) { return s.avail > 0 && s.price <= cap; })[0];
+            var name = all.length ? all[0].name : "item";
+            setLines(panel, [
+                "Keep stocked: need " + need + " " + name + ", bought " + bought() + " so far.",
+                "Never paying more than " + (cap === Infinity ? "any price" : fmtMoney(cap)) + " each (10% over market value)."
+            ]);
+            if (left <= 0) {
+                btn.textContent = doneLabel("Restocked ✓");
+            } else if (Date.now() < busyUntil) {
+                btn.textContent = "Buying…";
+            } else if (pending && findConfirm()) {
+                btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.name + " @ " + fmtMoney(pending.price);
+            } else if (next) {
+                btn.textContent = "Buy " + Math.min(next.avail, left) + " × " + next.name + " @ " + fmtMoney(next.price) + " (cheapest)";
+            } else if (all.length) {
+                btn.textContent = "Cheapest is " + fmtMoney(all[0].price) + ", over your " + fmtMoney(cap) + " cap" +
+                    (restockRun() ? " · click to skip →" : "");
+            } else {
+                btn.textContent = "Waiting for the listings to load…";
+            }
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            note = "";
+            if (need - bought() <= 0) {
+                finishStop(dock);
+                return;
+            }
+            var c = findConfirm();
+            if (c && pending) {
+                pending = null;
+                busyUntil = Date.now() + 2000;
+                c.click();
+                render();
+                return;
+            }
+            var next = sellers().filter(function (s) { return s.avail > 0 && s.price <= cap; })[0];
+            if (!next) {
+                if (restockRun() && sellers().length) {
+                    finishStop(dock);  // everything is over the cap: skip it
+                }
+                return;
+            }
+            var qty = Math.min(next.avail, need - bought());
+            setField(next.input, qty);
+            recordBought(id, qty);
+            if (next.hidden) {
+                next.hidden.value = String(qty);
+            }
+            pending = { qty: qty, name: next.name, price: next.price };
+            busyUntil = Date.now() + 500;
+            setTimeout(function () {
+                var row = sellers().filter(function (s) { return s.price === next.price && s.avail === next.avail; })[0];
+                if (row && usable(row.buy)) {
+                    row.buy.click();
+                } else {
+                    note = "amount filled, press BUY yourself";
+                }
+                render();
+            }, 300);
+            render();
+        });
+
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] restock mode v" + VER);
+    }
+
+    // ---- Big Al's ammo: buy Standard rounds up to a minimum ---------------
+    // From the Keep-stocked link: ammo.php?thammo=<need>&thammoname=<name>.
+    // Opens Torn's Buy for that ammo and fills the amount; you confirm in Torn.
+    function ammoMode(need, ammoName) {
+        var btn = greenButton("th-ammo-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+        var opened = false;
+        var note = "";
+
+        function row() {
+            var spans = document.querySelectorAll("span");
+            for (var i = 0; i < spans.length; i++) {
+                if (spans[i].children.length === 0 && (spans[i].textContent || "").trim() === ammoName) {
+                    return spans[i].closest("[class*=rowWrap]");
+                }
+            }
+            return null;
+        }
+
+        // The amount box Torn shows after Buy: a visible text/number input
+        // that isn't ours, chat or search.
+        function amountBox() {
+            var inputs = document.querySelectorAll("input[type=text], input[type=number], input:not([type])");
+            for (var i = 0; i < inputs.length; i++) {
+                var el = inputs[i];
+                if (el.offsetParent === null || el.closest("#th-dock") || /search|chat|message/i.test((el.placeholder || "") + (el.getAttribute("aria-label") || ""))) {
+                    continue;
+                }
+                return el;
+            }
+            return null;
+        }
+
+        function render() {
+            var r = row();
+            if (r) {
+                r.style.outline = "2px solid #43a047";
+            }
+            setLines(panel, ["Keep stocked: buy " + need.toLocaleString("en-US") + " Standard " + ammoName + "."]);
+            btn.textContent = !r ? "Can't find " + ammoName + " on this page"
+                : opened ? doneLabel("Amount filled: press Torn's Buy, then click here")
+                : "Buy " + need.toLocaleString("en-US") + " × " + ammoName + " (Standard)";
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            note = "";
+            if (opened) {
+                finishStop(dock);
+                return;
+            }
+            var r = row();
+            var buy = r && r.querySelector("button[class*=buyButton]");
+            if (!buy) {
+                return;
+            }
+            buy.click();
+            setTimeout(function () {
+                var box = amountBox();
+                if (box) {
+                    setField(box, need);
+                    opened = true;
+                } else {
+                    note = "type " + need + " in Torn's box";
+                }
+                render();
+            }, 500);
+        });
+
+        render();
+        setInterval(render, 1000);
+        console.log("[TornHoarder] ammo mode v" + VER);
+    }
+
     if (window.top !== window) {
+        return;
+    }
+
+    stockBadge();
+
+    // The app's "Restock all" link: index.php?threstock=1 starts the run
+    // from the app's latest check.
+    if (/[?&]threstock=1/.test(location.search)) {
+        var begin = function (status) {
+            if (!startRestock((status && status.route) || [])) {
+                console.log("[TornHoarder] restock: nothing to buy");
+            }
+        };
+        if (typeof GM_xmlhttpRequest !== "undefined") {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, "stock-status"),
+                onload: function (res) {
+                    try {
+                        begin(JSON.parse(res.responseText));
+                    } catch (e) {
+                        begin(STOCK);
+                    }
+                },
+                onerror: function () { begin(STOCK); }
+            });
+        } else {
+            begin(STOCK);
+        }
+        return;
+    }
+
+    var ammoSpec = /[?&]thammo=([0-9]+)&thammoname=([^&]+)/.exec(location.search);
+    if (ammoSpec && location.pathname.indexOf("/ammo.php") === 0) {
+        ammoMode(Number(ammoSpec[1]), decodeURIComponent(ammoSpec[2]));
+        return;
+    }
+
+    var needSpec = /[?&]thneed=([0-9:]+)/.exec(location.search);
+    if (needSpec && location.pathname.indexOf("/page.php") === 0) {
+        marketBuyMode(needSpec[1]);
+        return;
+    }
+
+    if (location.pathname.indexOf("/factions.php") === 0) {
+        depositMode();
+        return;
+    }
+
+    if (location.pathname.indexOf("/item.php") === 0) {
+        ipecacMode();
+        return;
+    }
+
+    var buySpec = /[?&]thbuy=([0-9:,]+)/.exec(location.search);
+    if (buySpec && (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0)) {
+        buyMode(buySpec[1], (/[?&]thchk=([0-9]+)/.exec(location.search) || [0, 0])[1]);
         return;
     }
 
@@ -1278,6 +2086,8 @@ DEFAULT_CFG: Dict[str, object] = {
     "topMinQuality": 50.0,
     "scanMs": 1500,
     "reportUrl": "http://127.0.0.1:9999/shop-report",
+    "keepCash": 0,            # deposit offers leave this much in your wallet
+    "ipecacOver": 5_000_000,  # offer Ipecac after selling/listing at least this much (0 = never)
 }
 
 
@@ -1286,6 +2096,7 @@ def build_userscript(
     base_stats: Dict[int, Dict[str, object]],
     cfg: Optional[Dict[str, object]] = None,
     shop_run: Optional[Dict[str, object]] = None,
+    stock: Optional[Dict[str, object]] = None,
 ) -> str:
     merged_cfg = {**DEFAULT_CFG, **(cfg or {})}
     return (
@@ -1294,5 +2105,6 @@ def build_userscript(
         .replace("__CFG__", json.dumps(merged_cfg))
         # "built" tells one run's sales record apart from the next one's.
         .replace("__SHOP__", json.dumps(dict(shop_run or {"route": [], "items": {}}, built=int(time.time()))))
+        .replace("__STOCK__", json.dumps(stock or {"checked": 0, "short": []}))
         .replace("__VERSION__", __version__)
     )

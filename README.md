@@ -129,6 +129,22 @@ On both the shop run and Add Listing, the button and its review list sit in one 
 
 While you're traveling or abroad, Torn closes city shops and the Item Market. The script sees that (Torn marks the page) and pauses with a ✈ message instead of walking the shop route, and the app shows a warning under your profile card.
 
+## After selling: bank the cash, hide in hospital
+
+Under **Sell plan → Rules → After selling** set **Cash to keep on hand** and **Offer Ipecac Syrup after selling or listing at least** (default $5m). When a shop run finishes, or a listing batch is added:
+
+- **Deposit $X to the faction vault →** appears if your wallet (read live from Torn's sidebar) is above what you keep. On the faction Armory → Donate tab the button fills *wallet − keep* and presses DEPOSIT MONEY; you confirm. Nothing is offered at or below the keep amount, and the button is there any time you open the Donate tab.
+- **Take Ipecac Syrup →** appears when what you sold or listed reaches the threshold. Ipecac puts you in hospital for 60–90 minutes, where nobody can mug you while sales come in. It opens your Medical items with a **Use Ipecac Syrup** button (for 15 minutes after you choose it).
+
+## Keep stocked
+
+Items you always want on hand, with a minimum each: e.g. First Aid Kit 50, Ipecac Syrup 50, Smoke Grenade 50, and **Primary/Secondary ammo** (Standard rounds for whatever gun is equipped in that slot, read from `user/equipment`). Set them under **Keep stocked** at the top of the app.
+
+- The sell plan never sells an item below its minimum.
+- What's short shows in the app and as a red **⚠ N item(s) below minimum** badge on every Torn page (bottom left), with how many to buy and where: the cheaper of the city shop and the Item Market, never more than 10% over market value; ammo from Big Al's ammo page. Stock is re-read at most every 5 minutes, or with **Check now**.
+- **Restock all** walks through every stop like the shop run: one stop per city shop (all its items at once), then each Item Market item, then the ammo page. Each page fills the amount and presses Buy; you confirm; the button then goes on to the next stop.
+- A purchase counts the moment the script presses Buy (whoever confirms it), and links carry the time of the stock check, so a reload or a second run can't buy the same shortfall twice.
+
 ## Your listings
 
 Each Run also reads your active listings (`user/itemmarket`) and checks them against the current market. That includes items you no longer hold, which cost one extra market call each. The **Your listings** section on the Sell plan tab shows each one's price, the cheapest other listing, how many listings are cheaper, and a status:
@@ -165,11 +181,17 @@ With a saved API key, the top of the app shows your profile card: avatar, name, 
 
 **Today's 100 buys:** Torn allows 100 city-shop items a day across all shops, so the plan fills those 100 with the most profit per item first, then lists **Backups** in case a pick has sold out when you get there. Each completed scan logs shop stock to `data/cityshop_stock.csv` so restock times can be learned. Buying is your click on the shop page.
 
+Each row of **Today's buys**, and each restock alert, links to the shop with the amounts attached (`&thbuy=<id>:<qty>`); the userscript fills one item's amount and presses BUY, and you confirm.
+
 ### Restock watch
 
 The best flips (Bottle of Beer, Cagoutte 10-6, Birthday Wrapping Paper…) are almost always sold out: players buy them within minutes of a restock. Turn on **Watch shop stock** and the app checks city shop stock once a minute (1 API call) while the page is open, valuing each item at Torn's market value after tax. When a watched item (by default $500+ profit each and a 10%+ margin) comes back in stock you get a toast, a chime, and a link to the shop. Only stock changes are logged, and **Restocks seen** lists every logged restock so a schedule shows up over a day or two.
 
 Money is shown short throughout the app ($950, $1.2k, $15.6m, $2.95b); quantities stay exact.
+
+## Foreign stock history (for travel)
+
+Torn's API has no stock data for shops abroad, so `tools/log_foreign_stock.py` logs YATA's crowdsourced travel feed (`yata.yt/api/v1/travel/export/`, no key) every 5 minutes: `data/foreign_stock.csv` gets a row only when an item's stock or price changes, and `data/foreign_updates.csv` records each fresh report of a country. Leave it running (`python tools/log_foreign_stock.py`); it resumes where it left off. The history is for a trip planner that ranks destinations by the chance an item is still in stock when you land.
 
 ## App tabs
 

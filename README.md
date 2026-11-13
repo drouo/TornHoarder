@@ -191,7 +191,7 @@ Money is shown short throughout the app ($950, $1.2k, $15.6m, $2.95b); quantitie
 
 ## Foreign stock history (for travel)
 
-Torn's API has no stock data for shops abroad, so `tools/log_foreign_stock.py` logs YATA's crowdsourced travel feed (`yata.yt/api/v1/travel/export/`, no key) every 5 minutes: `data/foreign_stock.csv` gets a row only when an item's stock or price changes, and `data/foreign_updates.csv` records each fresh report of a country. Leave it running (`python tools/log_foreign_stock.py`); it resumes where it left off. The history is for a trip planner that ranks destinations by the chance an item is still in stock when you land.
+Torn's API has no stock data for shops abroad, so `tools/log_foreign_stock.py` logs YATA's crowdsourced travel feed (`yata.yt/api/v1/travel/export/`, no key) every 5 minutes: `data/foreign_stock.csv` gets a row only when an item's stock or price changes, and `data/foreign_updates.csv` records each fresh report of a country. Leave it running (`python tools/log_foreign_stock.py`); it resumes where it left off, and only one copy runs at a time. To start it at login, put a shortcut in the Startup folder (Win+R → `shell:startup`) that runs `pythonw.exe tools\log_foreign_stock.py --log data\foreign_logger.log` with the project folder as its working directory. The history is for a trip planner that ranks destinations by the chance an item is still in stock when you land.
 
 ## App tabs
 

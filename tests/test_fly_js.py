@@ -39,12 +39,20 @@ const travel = el({ textContent: "Travel", className: "torn-btn", click() { log.
 const root = el({ selected: page.selected, querySelectorAll: s => (s === "button.torn-btn" ? [travel] : []) });
 Object.defineProperty(root, "textContent", { get() { return confirm(this.selected); } });
 const pins = {};
-["Canada", "Argentina", "South Africa"].forEach(c => { pins[c] = el({ click() { log.push("pin:" + c); root.selected = c; } }); });
+const names = ["Canada", "Argentina", "South Africa", "Cayman Islands"];
+// page.deadPins: pin clicks do nothing (only the dropdown changes the destination).
+names.forEach(c => { pins[c] = el({ click() { log.push("pin:" + c); if (!page.deadPins) root.selected = c; } }); });
+const dest = el({ className: "react-dropdown-default destDropdown___vb", value: "0",
+  options: names.map((c, i) => ({ textContent: "To: " + c, value: String(i + 1) })),
+  dispatchEvent(e) { const o = this.options.find(x => x.value === this.value); log.push("dropdown:" + o.textContent.slice(4)); root.selected = o.textContent.slice(4); } });
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
   body: el({ dataset: { abroad: "false", traveling: page.traveling ? "true" : "false" } }),
   getElementById: id => (id === "travel-root" ? root : null),
-  querySelector: s => { const m = /aria-label="([^"]+)"/.exec(s); return m ? pins[m[1]] || null : null; },
+  querySelector: s => {
+    if (/destDropdown/.test(s)) return page.noDropdown ? null : dest;
+    const m = /aria-label="([^"]+)"/.exec(s); return m ? pins[m[1]] || null : null;
+  },
   querySelectorAll: () => [], addEventListener() {}, createTextNode: t => ({ textContent: t, kids: [] }),
 };
 global.setInterval = () => 0;
@@ -73,8 +81,18 @@ class FlyJsTest(unittest.TestCase):
 
     def test_first_click_picks_the_country_second_presses_travel(self):
         out = self.run_page(fly="Argentina", selected="Canada", clicks=2)
-        self.assertEqual(out["buttons"][0], "Pick Argentina on the map")
+        self.assertEqual(out["buttons"][0], "Pick Argentina")
         self.assertEqual(out["buttons"][1], "✈ Travel to Argentina (1 hour and 51 minutes)")
+        self.assertEqual(out["log"], ["pin:Argentina", "dropdown:Argentina", "travel:Argentina"])
+
+    def test_the_dropdown_picks_it_when_the_pin_click_does_nothing(self):
+        # Live: the pin click left Torn on the last destination (Mexico).
+        out = self.run_page(fly="Cayman Islands", selected="Mexico", clicks=2, deadPins=True)
+        self.assertEqual(out["buttons"][1], "✈ Travel to Cayman Islands (1 hour and 51 minutes)")
+        self.assertEqual(out["log"], ["pin:Cayman Islands", "dropdown:Cayman Islands", "travel:Cayman Islands"])
+
+    def test_pin_alone_still_works_without_a_dropdown(self):
+        out = self.run_page(fly="Argentina", selected="Canada", clicks=2, noDropdown=True)
         self.assertEqual(out["log"], ["pin:Argentina", "travel:Argentina"])
 
     def test_never_presses_travel_for_another_country(self):

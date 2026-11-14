@@ -2160,6 +2160,43 @@ TEMPLATE = """\
             return document.querySelector('button[class*=pin___][aria-label="' + country + '"]');
         }
 
+        // The destination dropdown beside the map ("To: <Country>"); a pin
+        // click alone didn't always change the destination.
+        function destOption() {
+            var s = document.querySelector("select[class*=destDropdown]");
+            var o = s && Array.prototype.filter.call(s.options || [], function (x) {
+                return (x.textContent || "").trim() === "To: " + country;
+            })[0];
+            return o ? { select: s, value: o.value } : null;
+        }
+
+        var logged = false;
+
+        function pick() {
+            if (pin()) {
+                pin().click();
+            }
+            var d = destOption();
+            if (d && d.select.value !== d.value) {
+                var proto = typeof HTMLSelectElement !== "undefined" &&
+                    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+                if (proto && proto.set) {
+                    proto.set.call(d.select, d.value);
+                } else {
+                    d.select.value = d.value;
+                }
+                d.select.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            setTimeout(function () {
+                var c = confirmText();
+                if (!logged && !(c && c.country === country)) {
+                    logged = true;
+                    console.log("[TornHoarder] fly: " + country + " not picked. Pin: " + !!pin() + " · dropdown: " +
+                        (d ? d.select.value + "→" + d.value : "none") + " · page says: " + (c ? c.country : "no confirm text"));
+                }
+            }, 1500);
+        }
+
         function render() {
             if (document.body.dataset.traveling === "true") {
                 btn.textContent = "✈ On the way to " + country + ". The shop page there will have your buy button.";
@@ -2174,8 +2211,8 @@ TEMPLATE = """\
                 btn.textContent = "Taking off…";
             } else if (ready) {
                 btn.textContent = "✈ Travel to " + country + " (" + c.time + ")";
-            } else if (pin()) {
-                btn.textContent = "Pick " + country + " on the map";
+            } else if (pin() || destOption()) {
+                btn.textContent = "Pick " + country;
             } else {
                 btn.textContent = "Can't find " + country + " on this page";
             }
@@ -2196,8 +2233,8 @@ TEMPLATE = """\
                     busyUntil = Date.now() + 3000;
                     t.click();
                 }
-            } else if (pin()) {
-                pin().click();
+            } else {
+                pick();
             }
             render();
         });

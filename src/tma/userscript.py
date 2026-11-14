@@ -2430,6 +2430,26 @@ TEMPLATE = """\
             return null;
         }
 
+        // Why next() found nothing although profitable rows are listed.
+        var whyLogged = false;
+
+        function whyNothing(all, cap) {
+            var wallet = walletNow();
+            var why = !cap ? "can't read your bag count on this page" :
+                all.every(function (r) { return r.stock <= 0; }) ? "all sold out" :
+                wallet != null && all.every(function (r) { return wallet < r.cost; }) ? "not enough cash on hand" :
+                "can't work out an amount";
+            if (!whyLogged) {
+                whyLogged = true;
+                var m = /purchased[^.]{0,40}/i.exec(document.body.textContent || "");
+                console.log("[TornHoarder] abroad: nothing to buy (" + why + "). Bag text: " + (m ? m[0] : "not found") +
+                    " · wallet: " + wallet + " · rows: " + all.map(function (r) {
+                        return r.name + " stock " + r.stock + " cost " + r.cost + " profit " + r.profit;
+                    }).join("; "));
+            }
+            return why;
+        }
+
         // After Buy, Torn swaps the row's controls for its "are you sure"
         // question, so the row no longer looks buyable. Until the bag count
         // goes up (or PENDING_MS passes) the button stays on that item and
@@ -2548,7 +2568,8 @@ TEMPLATE = """\
                 btn.textContent = "Buy " + n.qty + " × " + n.row.name + " · " + fmtMoney(n.qty * n.row.cost) +
                     " (+" + fmtMoney(n.qty * n.row.profit) + ")";
             } else {
-                btn.textContent = cap && cap.bought >= cap.max ? doneLabel("Bag full ✓ fly home") : doneLabel("Nothing worth buying here");
+                btn.textContent = cap && cap.bought >= cap.max ? doneLabel("Bag full ✓ fly home") :
+                    all.length ? doneLabel("Nothing to buy: " + whyNothing(all, cap)) : doneLabel("Nothing worth buying here");
             }
             if (note) {
                 btn.textContent += " — " + note;

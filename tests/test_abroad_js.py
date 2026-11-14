@@ -62,7 +62,7 @@ const rows = page.rows.map(r => {
   row.buy = buy;
   return row;
 });
-const bag = n => "You have purchased " + n + " / 18 items so far.";
+const bag = n => (page.noBag ? "You are in Cayman Islands." : "You have purchased " + n + " / 18 items so far.");
 let onClick = null;
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
@@ -173,6 +173,10 @@ class AbroadJsTest(unittest.TestCase):
         rows = [{"id": 206, "name": "Xanax", "cost": 775_563, "stock": 40}]
         out = self.run_page(rows=rows, wallet=2_000_000)
         self.assertTrue(out["button"].startswith("Buy 2 × Xanax"), out["button"])
+
+    def test_says_why_when_profitable_items_cant_be_bought(self):
+        self.assertIn("Nothing to buy: can't read your bag count", self.run_page(noBag=True)["button"])
+        self.assertIn("Nothing to buy: not enough cash on hand", self.run_page(wallet=10)["button"])
 
     def test_full_bag_says_fly_home(self):
         self.assertIn("Bag full ✓ fly home", self.run_page(bought=18)["button"])

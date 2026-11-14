@@ -2430,6 +2430,53 @@ TEMPLATE = """\
             return null;
         }
 
+        // Done buying: the button flies home. Click 1 presses Torn's own
+        // fly-home control; click 2 confirms if Torn asks.
+        var homeAt = 0;
+        var homeLogged = false;
+
+        function visibleControls() {
+            return Array.prototype.filter.call(document.querySelectorAll("button, a"), function (b) {
+                return b.offsetParent !== null && !/^th-/.test(b.id || "") && !/buyButton/.test(b.className || "");
+            });
+        }
+
+        function homeControl() {
+            return visibleControls().filter(function (b) {
+                var t = (b.textContent || "").trim();
+                return /^(travel|fly|return|go)\\b.*\\b(home|torn|back)\\b/i.test(t) || /^(back|return) to torn/i.test(t);
+            })[0] || null;
+        }
+
+        function homeConfirm() {
+            if (!homeAt || Date.now() - homeAt > PENDING_MS) {
+                return null;
+            }
+            return visibleControls().filter(function (b) {
+                return /^(travel|yes|confirm|continue)$/i.test((b.textContent || "").trim());
+            })[0] || null;
+        }
+
+        function logHome() {
+            if (homeLogged) {
+                return;
+            }
+            homeLogged = true;
+            console.log("[TornHoarder] abroad: no fly-home control recognized. Buttons and links: " +
+                visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
+        }
+
+        function homeLabel(base) {
+            if (homeConfirm()) {
+                return "✈ Confirm: fly home";
+            }
+            if (homeControl()) {
+                return base + " · ✈ Fly home";
+            }
+            logHome();
+            return base + " · fly home from Torn's page (click to close)";
+        }
+
         // Why next() found nothing although profitable rows are listed.
         var whyLogged = false;
 
@@ -2557,7 +2604,7 @@ TEMPLATE = """\
             var c = pendingConfirm();
             var n = next(all);
             if (Date.now() < busyUntil) {
-                btn.textContent = "Buying…";
+                btn.textContent = homeAt && !pending ? "Taking off…" : "Buying…";
             } else if (pending && c) {
                 btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.row.name + " · " + fmtMoney(pending.qty * pending.row.cost);
             } else if (pending) {
@@ -2568,8 +2615,8 @@ TEMPLATE = """\
                 btn.textContent = "Buy " + n.qty + " × " + n.row.name + " · " + fmtMoney(n.qty * n.row.cost) +
                     " (+" + fmtMoney(n.qty * n.row.profit) + ")";
             } else {
-                btn.textContent = cap && cap.bought >= cap.max ? doneLabel("Bag full ✓ fly home") :
-                    all.length ? doneLabel("Nothing to buy: " + whyNothing(all, cap)) : doneLabel("Nothing worth buying here");
+                btn.textContent = homeLabel(cap && cap.bought >= cap.max ? "Bag full ✓" :
+                    all.length ? "Nothing to buy: " + whyNothing(all, cap) : "Nothing worth buying here");
             }
             if (note) {
                 btn.textContent += " — " + note;
@@ -2592,7 +2639,17 @@ TEMPLATE = """\
             }
             var n = next(rows());
             if (!n) {
-                dock.close();
+                var home = homeConfirm() || homeControl();
+                if (!home) {
+                    dock.close();
+                    return;
+                }
+                if (!homeAt || Date.now() - homeAt > PENDING_MS) {
+                    homeAt = Date.now();
+                }
+                busyUntil = Date.now() + 800;
+                home.click();
+                render();
                 return;
             }
             setMoney(n.row.box, n.row.hidden, n.qty);

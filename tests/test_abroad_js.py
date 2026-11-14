@@ -64,12 +64,17 @@ const rows = page.rows.map(r => {
 });
 const bag = n => (page.noBag ? "You are in Cayman Islands." : "You have purchased " + n + " / 18 items so far.");
 let onClick = null;
+// Torn's own fly-home control (label unverified live) and its confirm.
+let homeAsking = false;
+const home = el({ textContent: page.homeLabel || "", click() { pressed.push("home"); if (page.homeAsks) homeAsking = true; } });
+const homeYes = el({ textContent: "Travel", click() { pressed.push("home-confirm"); } });
+const controls = () => (page.homeLabel ? [home].concat(homeAsking ? [homeYes] : []) : []);
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
   body: el({ dataset: { abroad: "true", traveling: "false", country: "mexico" }, textContent: bag(page.bought) }),
   getElementById: () => null,
   querySelector: s => (s === "#user-money" ? el({ attrs: { "data-money": String(page.wallet) } }) : null),
-  querySelectorAll: s => (/row___/.test(s) ? rows : []),
+  querySelectorAll: s => (/row___/.test(s) ? rows : s === "button, a" ? controls() : []),
   createTextNode: t => ({ textContent: t, kids: [] }),
   addEventListener(t, f) { if (t === "click") onClick = f; },
 };
@@ -178,8 +183,14 @@ class AbroadJsTest(unittest.TestCase):
         self.assertIn("Nothing to buy: can't read your bag count", self.run_page(noBag=True)["button"])
         self.assertIn("Nothing to buy: not enough cash on hand", self.run_page(wallet=10)["button"])
 
-    def test_full_bag_says_fly_home(self):
-        self.assertIn("Bag full ✓ fly home", self.run_page(bought=18)["button"])
+    def test_full_bag_without_a_fly_home_control_says_to_use_torns_page(self):
+        self.assertIn("Bag full ✓ · fly home from Torn's page", self.run_page(bought=18)["button"])
+
+    def test_full_bag_flies_home_and_confirms(self):
+        out = self.run_page(bought=18, homeLabel="Travel back to Torn", homeAsks=True, click=True, clicks=2)
+        self.assertEqual(out["button"], "Bag full ✓ · ✈ Fly home")
+        self.assertEqual(out["buttons"][0], "✈ Confirm: fly home")
+        self.assertEqual(out["pressed"], ["home", "home-confirm"])
 
     def test_without_prices_it_says_to_plan_first(self):
         out = self.run_page(prices={"checked": 0, "sell": {}})

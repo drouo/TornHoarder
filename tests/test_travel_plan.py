@@ -1,12 +1,16 @@
+import json
 import sys
+import threading
 import unittest
+import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from tma.autoupdate_server import build_server
 from tma.foreign_stock import StockLog
-from tma.travel_plan import arrival_samples, candidates, load_history, plan_trips, sell_prices
+from tma.travel_plan import arrival_samples, candidates, load_history, plan_trips, sell_prices, write_prices
 
 STEP = 300  # the logger's 5 minutes
 
@@ -63,6 +67,20 @@ class TravelPlanTest(unittest.TestCase):
         with TemporaryDirectory() as d:
             h, _ = build(d, lambda i: 10, lambda i: 10)
             self.assertEqual(candidates(h, {1: 2000, 2: 1000, 3: 1100}), [1, 3])
+
+    def test_prices_reach_the_userscript_through_the_local_server(self):
+        with TemporaryDirectory() as d:
+            path = Path(d) / "travel_prices.json"
+            server = build_server(Path(d) / "x.user.js", port=0, travel_path=path)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            url = f"http://127.0.0.1:{server.server_address[1]}/travel-prices"
+            try:
+                self.assertEqual(json.loads(urllib.request.urlopen(url, timeout=5).read()), {"checked": 0, "sell": {}})
+                write_prices(path, {261: 28_500.4}, now=100)
+                self.assertEqual(json.loads(urllib.request.urlopen(url, timeout=5).read()), {"checked": 100, "sell": {"261": 28500}})
+            finally:
+                server.shutdown()
+                server.server_close()
 
 
 if __name__ == "__main__":

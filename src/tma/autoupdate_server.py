@@ -27,13 +27,20 @@ MAX_REPORT_BYTES = 200_000
 
 
 def _make_handler(
-    script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None
+    script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
+    travel_path: Optional[Path] = None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
+    # JSON the app writes for the userscript to fetch, with what to serve before it exists.
+    feeds = {
+        "/stock-status": (status_path, b'{"checked": 0, "short": []}'),  # Keep stocked badge
+        "/travel-prices": (travel_path, b'{"checked": 0, "sell": {}}'),  # buying abroad
+    }
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
-            if self.path == "/stock-status":
-                # The app's latest Keep-stocked check, for the userscript's badge.
-                body = status_path.read_bytes() if status_path and status_path.exists() else b'{"checked": 0, "short": []}'
+            if self.path in feeds:
+                path, empty = feeds[self.path]
+                body = path.read_bytes() if path and path.exists() else empty
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Cache-Control", "no-cache, max-age=0")
@@ -82,7 +89,7 @@ def _make_handler(
 
 def build_server(
     script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None,
-    status_path: Optional[Path] = None,
+    status_path: Optional[Path] = None, travel_path: Optional[Path] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
-    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path))
+    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path, travel_path))

@@ -2003,11 +2003,166 @@ TEMPLATE = """\
         console.log("[TornHoarder] ammo mode v" + VER);
     }
 
+    // ---- Abroad: fill your bag with what pays best -------------------------
+    // On the shop page abroad, ranks what's in stock by the app's sell prices
+    // (Where to fly → Plan a trip). Click 1 fills the best item's amount (what
+    // you can still carry and afford) and presses its Buy; click 2 confirms if
+    // Torn asks. Then the next best, until the bag is full.
+    function abroadMode() {
+        var prices = { checked: 0, sell: {} };
+        var pending = null;
+        var busyUntil = 0;
+        var note = "";
+        var btn = greenButton("th-abroad-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+
+        function num(text) {
+            return parseInt(String(text || "").replace(/[^0-9]/g, ""), 10) || 0;
+        }
+
+        function capacity() {
+            var m = /purchased\\s+([0-9,]+)\\s*\\/\\s*([0-9,]+)\\s+items/i.exec(document.body.textContent || "");
+            return m ? { bought: num(m[1]), max: num(m[2]) } : null;
+        }
+
+        function rows() {
+            var out = [];
+            Array.prototype.forEach.call(document.querySelectorAll("[class*=row___]"), function (row) {
+                var box = row.querySelector("input.input-money:not([type=hidden])");
+                var img = row.querySelector("img");
+                var id = img && (/\\/images\\/items\\/([0-9]+)\\//.exec(img.getAttribute("src") || "") || [])[1];
+                if (!box || !id) {
+                    return;
+                }
+                var nameEl = row.querySelector("[class*=itemNameButton]");
+                var priceEl = row.querySelector("[class*=displayPrice]");
+                var stockEl = Array.prototype.filter.call(row.querySelectorAll("[class*=srOnly]"), function (s) {
+                    return /stock/i.test(s.textContent);
+                })[0];
+                var cost = priceEl ? num(priceEl.textContent) : 0;
+                var sell = Number(prices.sell[id]) || 0;
+                out.push({
+                    id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, box: box,
+                    hidden: row.querySelector("input.input-money[type=hidden]"),
+                    buy: row.querySelector("button[class*=buyButton]"),
+                    cost: cost, stock: stockEl ? num(stockEl.parentElement.textContent) : 0, profit: sell - cost
+                });
+            });
+            return out.filter(function (r) { return r.profit > 0 && r.cost > 0; })
+                .sort(function (a, b) { return b.profit - a.profit; });
+        }
+
+        function next(all) {
+            var cap = capacity();
+            var left = cap ? cap.max - cap.bought : 0;
+            var wallet = walletNow();
+            for (var i = 0; i < all.length; i++) {
+                var r = all[i];
+                var qty = Math.min(r.stock, left, wallet ? Math.floor(wallet / r.cost) : left);
+                if (qty > 0) {
+                    return { row: r, qty: qty };
+                }
+            }
+            return null;
+        }
+
+        function render() {
+            var cap = capacity();
+            var all = rows();
+            var lines = [];
+            if (!prices.checked) {
+                lines.push("No prices yet: in the app, open Where to fly and click Plan a trip, then reload this page.");
+            } else {
+                var age = Math.round((Date.now() / 1000 - prices.checked) / 60);
+                lines.push("Best buys here, by the app's prices from " + age + " min ago (profit each after tax):");
+                all.slice(0, 6).forEach(function (r) {
+                    lines.push("· " + r.name + ": +" + fmtMoney(r.profit) + " · " + r.stock.toLocaleString("en-US") + " in stock");
+                });
+                if (!all.length) {
+                    lines.push("Nothing in stock here resells at a profit.");
+                }
+            }
+            if (cap) {
+                lines.push("Bag: " + cap.bought + " of " + cap.max + " bought.");
+            }
+            setLines(panel, lines);
+            var c = findConfirm();
+            var n = next(all);
+            if (Date.now() < busyUntil) {
+                btn.textContent = "Buying…";
+            } else if (c && pending) {
+                btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.row.name + " · " + fmtMoney(pending.qty * pending.row.cost);
+            } else if (n) {
+                btn.textContent = "Buy " + n.qty + " × " + n.row.name + " · " + fmtMoney(n.qty * n.row.cost) +
+                    " (+" + fmtMoney(n.qty * n.row.profit) + ")";
+            } else {
+                btn.textContent = cap && cap.bought >= cap.max ? doneLabel("Bag full ✓ fly home") : doneLabel("Nothing worth buying here");
+            }
+            if (note) {
+                btn.textContent += " — " + note;
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            note = "";
+            var c = findConfirm();
+            if (c && pending) {
+                pending = null;
+                busyUntil = Date.now() + 2000;
+                c.click();
+                render();
+                return;
+            }
+            var n = next(rows());
+            if (!n) {
+                dock.close();
+                return;
+            }
+            setMoney(n.row.box, n.row.hidden, n.qty);
+            pending = n;
+            if (!usable(n.row.buy)) {
+                note = "amount filled, press Buy yourself";
+                render();
+                return;
+            }
+            busyUntil = Date.now() + 800;
+            n.row.buy.click();
+            render();
+        });
+
+        if (typeof GM_xmlhttpRequest !== "undefined") {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, "travel-prices"),
+                onload: function (res) {
+                    try {
+                        prices = JSON.parse(res.responseText);
+                    } catch (e) { /* keep none */ }
+                    render();
+                }
+            });
+        }
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] abroad mode v" + VER);
+    }
+
     if (window.top !== window) {
         return;
     }
 
     stockBadge();
+
+    // The shop page abroad (Torn sends you there on landing).
+    if (location.pathname.indexOf("/page.php") === 0 && /[?&]sid=travel(&|$)/.test(location.search) &&
+            document.body.dataset.abroad === "true" && document.body.dataset.traveling !== "true") {
+        abroadMode();
+        return;
+    }
 
     // The app's "Restock all" link: index.php?threstock=1 starts the run
     // from the app's latest check.

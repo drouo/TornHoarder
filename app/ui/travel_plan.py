@@ -12,7 +12,7 @@ from tma.fmt import money
 from tma.http_client import session_for_requests, shared_bucket
 from tma.item_stats import load_profiles
 from tma.market_fetch import fetch_all_item_markets
-from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices
+from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices, write_prices
 
 from .. import paths
 from .page_progress import PageProgress
@@ -46,7 +46,9 @@ def render_travel_plan(api_key: str) -> None:
             rows, _ = fetch_all_item_markets(session_for_requests(), shared_bucket(), api_key, ids, {i: 0 for i in ids}, on_progress=progress)
             bar.empty()
             page.clear()
-            st.session_state["travel_plan"] = {"sell": sell_prices(rows, refs), "when": pd.Timestamp.now().strftime("%H:%M")}
+            sell = sell_prices(rows, refs)
+            write_prices(paths.TRAVEL_PRICES_PATH, sell)
+            st.session_state["travel_plan"] = {"sell": sell, "when": pd.Timestamp.now().strftime("%H:%M")}
         got = st.session_state.get("travel_plan")
         if not got:
             return
@@ -74,5 +76,7 @@ def render_travel_plan(api_key: str) -> None:
         st.caption(
             "**Expected trip profit** assumes you buy the best item and top up with the backups if it's run short. "
             "**Per hour** divides by the round trip. **Odds from** says how many past moments back the odds: "
-            "\"like now\" matched today's state, \"any time\" means too few matches so far, so it uses every moment."
+            "\"like now\" matched today's state, \"any time\" means too few matches so far, so it uses every moment.  \n"
+            "**When you land**, open the shop there: the userscript ranks what's in stock by these prices and fills "
+            "the best item up to what you can still carry and afford; you click its button to buy."
         )

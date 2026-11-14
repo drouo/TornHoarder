@@ -43,3 +43,4 @@ data/stock_status.json
 data/foreign_logger.log
 data/foreign_logger.err
 data/foreign_logger.lock
+data/travel_prices.json

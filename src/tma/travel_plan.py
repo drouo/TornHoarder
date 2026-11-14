@@ -12,7 +12,9 @@ if it has run short.
 from __future__ import annotations
 
 import csv
+import json
 import random
+import time
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,6 +111,13 @@ def sell_prices(market_rows: dict[int, dict], ref_prices: dict[int, float]) -> d
             continue
         out[iid] = sell * (1.0 - MARKET_FEE)
     return out
+
+
+def write_prices(path: Path, sell: dict[int, float], now: Optional[float] = None) -> None:
+    """Save sell prices for the userscript, which picks what to buy on the shop page abroad."""
+    data = {"checked": int(now or time.time()), "sell": {str(k): round(v) for k, v in sell.items()}}
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(data), encoding="utf-8")
 
 
 def candidates(h: History, ref_prices: dict[int, float]) -> list[int]:

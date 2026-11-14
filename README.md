@@ -10,8 +10,8 @@ Originally created by **Victor Belinchón** ([Kzon [3968250]](https://www.torn.c
 
 1. Install Python 3.10+, then run `pip install -r requirements.txt`.
 2. Start the app with `streamlit run app/streamlit_app.py`. On Windows you can use `powershell -ExecutionPolicy Bypass -File tools\server.ps1 start` instead.
-3. Open http://localhost:8501, enter a **Limited** Torn API key, choose your **Sell categories**, and click **Run**. The first run reads every weapon/armor copy's stats and takes a while. Those stats never change, so later runs reuse them (`data/uid_stats.json`) and only fetch fresh market prices.
-4. On the **Autofill script** tab, click the link to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together. The app serves the script at `http://127.0.0.1:9999/tornhoarder.user.js`. After each **Run**, Tampermonkey's *Check for userscript updates* picks up the new prices.
+3. Open http://localhost:8501, enter a **Limited** Torn API key in the sidebar, check **Run settings** (your **Sell categories**), and click **Run** at the top of the **Sell** section. The first run reads every weapon/armor copy's stats and takes a while. Those stats never change, so later runs reuse them (`data/uid_stats.json`) and only fetch fresh market prices.
+4. In the sidebar, click **Install / update** to install the script into [Tampermonkey](https://www.tampermonkey.net/). Use one Tampermonkey only, not the regular and BETA builds together. The app serves the script at `http://127.0.0.1:9999/tornhoarder.user.js`. After each **Run**, Tampermonkey's *Check for userscript updates* picks up the new prices.
 5. Check the **Sell plan** tab, and change any plan or **Keeping** number you disagree with.
 6. Click **Start shop run →** and sell the Shop items (see [Shop run](#shop-run)).
 7. Click **Open Add Listing →** and list everything else (see [Listing on the Item Market](#listing-on-the-item-market)).
@@ -201,7 +201,13 @@ Torn's API has no stock data for shops abroad, so `tools/log_foreign_stock.py` l
 
 **Restock alerts.** The local server's `/restocks` lists items abroad that went from sold out to in stock in the last hour and still are, from the foreign stock log. On any Torn page at home, the userscript chimes once and shows a blue pill when a full bag of one clears $100,000 at the app's sell prices (so click **Plan a trip** first), with a **Fly ✈** link; **dismiss** hides those.
 
-## App tabs
+## App layout
+
+- **Sidebar:** the API key (every tool uses it), the Torn script's **Install / update** link and version, and **Restart**.
+- **Status board:** one row per job (Sell prices, Torn script, Keep stocked, City shop buys, Where to fly, Foreign stock logger) with ✅ up to date, ⚠️ stale or ○ never run, what the last run found, what to do next, and a button to that section. It reads the files the tools write, so it survives restarts. Stale means: sell prices over 6h, stock check over 2h, travel prices over 30 min, a shop scan from before Torn's midnight, or no logger update for 15 min.
+- **Section buttons:** **Sell** (Run, Run settings, then the result tabs below), **Restock** (Keep stocked, City shops, Restock watch), **Travel** (Where to fly, Trip log) and **Help**. A • marks a section with something to do. Only the chosen section renders; Keep stocked is still checked on every page so the Torn badge stays current. The restock watch only runs while **Restock** is open.
+
+The **Sell** section's result tabs, after a Run:
 
 | Tab | Contents |
 |---|---|

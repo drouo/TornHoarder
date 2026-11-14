@@ -24,7 +24,7 @@ const el = () => ({ style: {}, appendChild() {}, addEventListener() {}, setAttri
 global.window = { scrollTo() {}, scrollBy() {}, innerHeight: 800, scrollY: 0 };
 window.top = window;
 global.location = { pathname: "/page.php", search: "?sid=ItemMarket", hash: "#/addListing" };
-global.document = { createElement: el, body: el(), querySelector() { return null; }, querySelectorAll() { return []; }, documentElement: { scrollHeight: 0 } };
+global.document = { createElement: el, body: el(), getElementById: () => null, addEventListener() {}, createTextNode: t => ({ textContent: t }), querySelector() { return null; }, querySelectorAll() { return []; }, documentElement: { scrollHeight: 0 } };
 global.setInterval = () => 0;
 global.setTimeout = () => 0;
 global.console = { log() {} };

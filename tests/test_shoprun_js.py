@@ -32,7 +32,8 @@ global.window = { scrollTo() {} };
 window.top = window;
 global.location = { pathname: "/shops.php", search: "?step=pharmacy", hash: "", href: "" };
 global.document = { createElement: el, body: Object.assign(el(), { dataset: JSON.parse(process.argv[4] || "{}") }),
-                    querySelector() { return null }, querySelectorAll() { return []; }, title: "Pharmacy | TORN" };
+                    querySelector() { return null }, querySelectorAll() { return []; }, title: "Pharmacy | TORN",
+                    getElementById: () => null, addEventListener() {}, createTextNode: t => ({ textContent: t }) };
 global.setInterval = () => 0;
 global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));

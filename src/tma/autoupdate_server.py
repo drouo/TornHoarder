@@ -28,12 +28,13 @@ MAX_REPORT_BYTES = 200_000
 
 def _make_handler(
     script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
-    travel_path: Optional[Path] = None,
+    travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     # JSON the app writes for the userscript to fetch, with what to serve before it exists.
     feeds = {
         "/stock-status": (status_path, b'{"checked": 0, "short": []}'),  # Keep stocked badge
         "/travel-prices": (travel_path, b'{"checked": 0, "sell": {}}'),  # buying abroad
+        "/shop-plan": (plan_path, b'{"checked": 0, "route": []}'),  # the day's city-shop buys
     }
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -89,7 +90,7 @@ def _make_handler(
 
 def build_server(
     script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None,
-    status_path: Optional[Path] = None, travel_path: Optional[Path] = None,
+    status_path: Optional[Path] = None, travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
-    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path, travel_path))
+    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path, travel_path, plan_path))

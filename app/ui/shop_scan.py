@@ -11,11 +11,12 @@ from tma.fmt import money
 from tma.item_stats import load_profiles
 from tma.http_client import session_for_requests, shared_bucket
 from tma.market_fetch import fetch_all_item_markets
-from tma.shop_flips import DAILY_CAP, daily_buy_plan, fetch_city_shops, log_stock, scan_flips
+from tma.shop_flips import (
+    DAILY_CAP, daily_buy_plan, day_start, fetch_city_shops, log_stock, plan_route, reset_in_s, scan_flips, write_plan,
+)
 
 from .. import paths
 from .page_progress import PageProgress
-from tma.shops import buy_url
 
 
 def render_shop_scan(api_key: str) -> None:
@@ -25,6 +26,11 @@ def render_shop_scan(api_key: str) -> None:
             "or so). Profit is $1 under the cheapest listing (never above Torn's market value, what "
             "it has actually been selling for) after Torn's 5% sales tax, minus the shop price. "
             "Each scan also logs shop stock to `data/cityshop_stock.csv` so restocks can be learned later."
+        )
+        left = reset_in_s()
+        st.markdown(
+            f"🛒 The 100-a-day limit resets at midnight Torn time, in **{left // 3600}h {left % 3600 // 60:02d}m**. "
+            "The badge on Torn pages counts what you've bought today."
         )
         if st.button("Scan shops", key="scan_shops", disabled=not api_key):
             sess = session_for_requests()
@@ -91,13 +97,13 @@ def render_shop_scan(api_key: str) -> None:
             plan_cfg = {**cfg, "Buy": st.column_config.NumberColumn(format="localized")}
             plan_cols = ("Item", "Shop", "Buy", "Buy at", "Sell at", "Profit / unit", "Margin %", "Profit", "Cost", "In stock")
             st.dataframe(buys, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)
-            links = []
-            for shop, grp in buys.groupby("Shop", sort=False):
-                url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
-                what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
-                links.append(f"[**{shop}: buy {what} →**]({url})" if url else f"{shop}: {what} (buy by hand)")
-            st.markdown("  \n".join(links).replace("$", "\\$"))
-            st.caption("Each link opens the shop with the userscript ready to fill the amounts; you click Buy and confirm.")
+            route = plan_route(buys, day_start())
+            write_plan(paths.SHOP_PLAN_PATH, route)
+            st.markdown("  \n".join(f"[**{s['label']} →**]({s['url']})" for s in route).replace("$", "\\$"))
+            st.caption(
+                "Each link opens the shop with the userscript ready to fill the amounts; you click Buy and confirm. "
+                "When the limit resets, the badge on Torn pages offers this plan as one run through every shop."
+            )
             if not spare.empty:
                 st.markdown("**Backups**, if a pick has sold out when you get there:")
                 st.dataframe(spare, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)

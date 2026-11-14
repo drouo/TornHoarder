@@ -52,7 +52,7 @@ const ids = {};
 });
 global.document = {
   createElement: () => el(), body: el({ dataset: {} }), documentElement: { scrollHeight: 0 },
-  getElementById: id => ids[id] || null,
+  getElementById: id => ids[id] || null, addEventListener() {}, createTextNode: t => ({ textContent: t, kids: [] }),
   querySelector(s) {
     if (s === "#user-money") return wallet;
     const m = /buyAmount\[\]"\]\[id="(\d+)"\]/.exec(s);

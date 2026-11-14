@@ -1692,11 +1692,11 @@ TEMPLATE = """\
         }
     }
 
-    function startRestock(route) {
+    function startRestock(route, name) {
         if (!route || !route.length) {
             return false;
         }
-        writePref(RESTOCK_KEY, JSON.stringify({ stops: route, i: 0, started: Date.now() }));
+        writePref(RESTOCK_KEY, JSON.stringify({ stops: route, i: 0, started: Date.now(), name: name || "Restock run" }));
         location.href = route[0].url;
         return true;
     }
@@ -1708,7 +1708,7 @@ TEMPLATE = """\
             return base + " (click to close)";
         }
         var nxt = r.stops[r.i + 1];
-        return base + (nxt ? " · Next: " + nxt.label + " →" : " · Restock run done ✓ (click to close)");
+        return base + (nxt ? " · Next: " + nxt.label + " →" : " · " + (r.name || "Restock run") + " done ✓ (click to close)");
     }
 
     function finishStop(dock) {
@@ -1807,6 +1807,134 @@ TEMPLATE = """\
         draw();
         refresh();
         setInterval(refresh, 120000);
+    }
+
+    // ---- City shops: 100 items a day, all shops together -------------------
+    // Torn resets the limit at midnight Torn time (UTC). Every BUY pressed on a
+    // city shop page counts, by hand or through a buy link. A BUY you then
+    // cancel at "Are you sure?" still counts, so the badge has a "fix" link.
+    var CITY_KEY = "tornhoarder.cityBuys";
+    var CITY_CAP = 100;
+
+    function dayStartMs(now) {
+        return now - now % DAY_MS;
+    }
+
+    function cityLog() {
+        try {
+            var log = JSON.parse(localStorage.getItem(CITY_KEY) || "[]");
+            return Array.isArray(log) ? log : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function cityUsed() {
+        var start = dayStartMs(Date.now());
+        return cityLog().reduce(function (n, x) { return x[0] >= start ? n + x[1] : n; }, 0);
+    }
+
+    function recordCity(qty) {
+        var start = dayStartMs(Date.now());
+        var log = cityLog().filter(function (x) { return x[0] >= start; });
+        log.push([Date.now(), qty]);
+        writePref(CITY_KEY, JSON.stringify(log));
+    }
+
+    function watchCityBuys() {
+        document.addEventListener("click", function (ev) {
+            var b = ev.target && ev.target.closest ? ev.target.closest(".buy-act button") : null;
+            var wrap = b && b.closest(".buy-act-wrap");
+            var input = wrap && wrap.querySelector('input[name="buyAmount[]"]');
+            var qty = input ? parseInt(input.value, 10) || 0 : 0;
+            if (qty > 0) {
+                recordCity(qty);
+            }
+        }, true);
+    }
+
+    function cityBadge() {
+        var plan = { checked: 0, route: [] };
+        var fixing = false;
+        var pill = document.createElement("div");
+        pill.id = "th-city-badge";
+        pill.style.cssText = "position:fixed;left:12px;bottom:56px;z-index:999997;max-width:360px;padding:6px 12px;" +
+            "border-radius:16px;color:#fff;font:bold 13px/1.4 Arial,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.5);";
+        document.body.appendChild(pill);
+
+        function link(text, onClick) {
+            var a = document.createElement("span");
+            a.textContent = text;
+            a.style.cssText = "color:#ffeb3b;text-decoration:underline;cursor:pointer;margin-left:8px;";
+            a.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                onClick();
+            });
+            return a;
+        }
+
+        function fix() {
+            fixing = true;
+            pill.textContent = "";
+            pill.appendChild(document.createTextNode("🛒 Bought in city shops today: "));
+            var box = document.createElement("input");
+            box.type = "number";
+            box.value = String(cityUsed());
+            box.style.cssText = "width:56px;";
+            pill.appendChild(box);
+            pill.appendChild(link("save", function () {
+                var n = Math.max(0, Math.min(CITY_CAP, parseInt(box.value, 10) || 0));
+                writePref(CITY_KEY, JSON.stringify(n ? [[dayStartMs(Date.now()), n]] : []));
+                fixing = false;
+                draw();
+            }));
+        }
+
+        function draw() {
+            if (fixing) {
+                return;
+            }
+            if (awayMessage()) {
+                pill.style.display = "none";
+                return;
+            }
+            pill.style.display = "block";
+            var stock = document.getElementById("th-stock-badge");
+            pill.style.bottom = stock && stock.style.display !== "none" ? ((stock.offsetHeight || 30) + 64) + "px" : "56px";
+            var used = Math.min(cityUsed(), CITY_CAP);
+            var left = CITY_CAP - used;
+            var ms = dayStartMs(Date.now()) + DAY_MS - Date.now();
+            var when = Math.floor(ms / 3600000) + "h " + ("0" + Math.floor(ms % 3600000 / 60000)).slice(-2) + "m";
+            pill.style.background = left === CITY_CAP ? "rgba(46,125,50,.92)" : "rgba(33,33,33,.92)";
+            pill.textContent = "";
+            pill.appendChild(document.createTextNode(
+                left === CITY_CAP ? "🛒 100 city-shop buys available"
+                    : left ? "🛒 City shops: " + left + " of 100 left · resets in " + when
+                        : "🛒 City shops: all 100 used · resets in " + when));
+            if (left === CITY_CAP && plan.route && plan.route.length) {
+                pill.appendChild(link("Today's buys: " + plan.route.length + " shop(s) →", function () {
+                    startRestock(plan.route, "Today's buys");
+                }));
+            }
+            if (used) {
+                pill.appendChild(link("fix", fix));
+            }
+        }
+
+        if (typeof GM_xmlhttpRequest !== "undefined") {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, "shop-plan"),
+                onload: function (res) {
+                    try {
+                        plan = JSON.parse(res.responseText);
+                    } catch (e) { /* no plan */ }
+                    draw();
+                }
+            });
+        }
+        draw();
+        setInterval(draw, 30000);
     }
 
     // ---- Item Market: buy back up to a minimum -----------------------------
@@ -2156,6 +2284,10 @@ TEMPLATE = """\
     }
 
     stockBadge();
+    cityBadge();
+    if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
+        watchCityBuys();
+    }
 
     // The shop page abroad (Torn sends you there on landing).
     if (location.pathname.indexOf("/page.php") === 0 && /[?&]sid=travel(&|$)/.test(location.search) &&

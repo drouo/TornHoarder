@@ -94,6 +94,7 @@ def isolate_stats_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "CITYSHOP_STOCK_PATH", tmp_path / "cityshop_stock.csv")
     monkeypatch.setattr(paths, "STOCK_STATUS_PATH", tmp_path / "stock_status.json")
     monkeypatch.setattr(paths, "TRAVEL_PRICES_PATH", tmp_path / "travel_prices.json")
+    monkeypatch.setattr(paths, "SHOP_PLAN_PATH", tmp_path / "shop_plan.json")
 
 
 @pytest.fixture(autouse=True)

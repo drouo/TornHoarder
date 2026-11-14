@@ -8,6 +8,8 @@ restock patterns can be learned later.
 from __future__ import annotations
 
 import csv
+import json
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,7 @@ import requests
 from .http_client import BASE_URL, TokenBucket, get_json_with_retry
 from .my_listings import market_listings
 from .sell_plan import MARKET_FEE
+from .shops import buy_url
 
 STOCK_COLUMNS = ("time", "shop", "item_id", "item_name", "price", "stock", "default_stock")
 
@@ -90,6 +93,36 @@ def scan_flips(
 
 
 DAILY_CAP = 100  # Torn: 100 city-shop items a day, all shops together
+DAY_S = 24 * 3600
+
+
+def day_start(now: Optional[float] = None) -> int:
+    """Start of the Torn day holding `now`: the limit resets at midnight Torn time (TCT, which is UTC)."""
+    t = int(time.time() if now is None else now)
+    return t - t % DAY_S
+
+
+def reset_in_s(now: Optional[float] = None) -> int:
+    t = int(time.time() if now is None else now)
+    return day_start(t) + DAY_S - t
+
+
+def plan_route(buys: pd.DataFrame, day: int) -> list[dict]:
+    """The day's buys as run stops, one per shop. Links are stamped with the
+    day's start, so what you bought yesterday doesn't count against today."""
+    route = []
+    for shop, grp in buys.groupby("Shop", sort=False):
+        url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
+        if url:
+            what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
+            route.append({"label": f"{shop}: {what}", "url": f"{url}&thchk={day}"})
+    return route
+
+
+def write_plan(path: Path, route: list[dict], now: Optional[float] = None) -> None:
+    """Save the day's plan for the userscript's daily-limit badge."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps({"checked": int(time.time() if now is None else now), "route": route}), encoding="utf-8")
 
 
 def daily_buy_plan(flips: pd.DataFrame, cap: int = DAILY_CAP, backups: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:

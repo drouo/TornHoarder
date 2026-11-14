@@ -31,7 +31,9 @@ try {
 
 
 def render_restock_watch(api_key: str) -> None:
-    with st.expander("Restock watch: catch the best shop items when they come back", expanded=bool(st.session_state.get("watch_on"))):
+    st.subheader("Restock watch")
+    with st.container(border=True):
+        st.caption("Catch the best shop items when they come back. The watch runs while this section is open.")
         st.caption(
             "The best city-shop flips are almost always sold out: players buy them within minutes of a restock. "
             "While this is on, the app checks shop stock once a minute (1 API call) and chimes when a watched item "

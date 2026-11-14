@@ -33,17 +33,25 @@ def _held(api_key: str, categories: tuple[str, ...]) -> tuple[dict[int, int], li
     return held, inv.errors
 
 
-def render_keep_stocked(api_key: str, bundle_fn: Callable[[str], dict]) -> None:
+def check_keep_stocked(api_key: str, bundle_fn: Callable[[str], dict]) -> dict:
+    """Re-reads stock (cached 5 minutes) on every page, whichever section is
+    open: the badge on Torn pages reads the status this writes."""
     minimums = load_minimums()
     profiles = load_profiles(paths.PROFILES_PATH)
-    rows = []
+    rows, errors = [], []
     if api_key and minimums:
         held, errors = _held(api_key, categories_for(minimums, profiles))
         rows = check_stock(minimums, held, (bundle_fn(api_key) or {}).get("equipment"), profiles)
         write_status(paths.STOCK_STATUS_PATH, rows)
+    return {"minimums": minimums, "profiles": profiles, "rows": rows, "errors": errors}
+
+
+def render_keep_stocked(api_key: str, bundle_fn: Callable[[str], dict], checked: dict) -> None:
+    minimums, profiles, rows, errors = checked["minimums"], checked["profiles"], checked["rows"], checked["errors"]
     short = [r for r in rows if r["need"] > 0]
     title = f"Keep stocked: ⚠ {len(short)} below minimum" if short else "Keep stocked"
-    with st.expander(title, expanded=bool(short)):
+    st.subheader(title)
+    with st.container(border=True):
         st.caption(
             "Items you always want on hand. Anything below its minimum shows here and as a badge on every Torn "
             "page, with a link to buy the difference where it's cheaper (city shop or Item Market, never over 10% "

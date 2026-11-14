@@ -25,7 +25,6 @@ def render_trip_log() -> None:
         return
     got = st.session_state.get("travel_plan")
     df = trip_table(buys, got["sell"] if got else None)
-    st.markdown("**Trip log**")
     money_cols = [c for c in ("Spent", "Expected profit", "Profit at today's prices") if c in df.columns]
     st.dataframe(df, width="stretch", hide_index=True,
                  column_config={c: st.column_config.NumberColumn(format="compact") for c in money_cols})
@@ -34,8 +33,16 @@ def render_trip_log() -> None:
 
 
 def render_travel_plan(api_key: str) -> None:
-    with st.expander("Where to fly"):
-        render_trip_log()
+    _planner(api_key)
+    if load_buys(paths.TRIP_BUYS_PATH):
+        st.subheader("Trip log")
+        with st.container(border=True):
+            render_trip_log()
+
+
+def _planner(api_key: str) -> None:
+    st.subheader("Where to fly")
+    with st.container(border=True):
         h = load_history(paths.FOREIGN_STOCK_PATH, paths.FOREIGN_UPDATES_PATH)
         if not h.obs:
             st.info("No foreign stock history yet. Start the logger: `python tools/log_foreign_stock.py`.")

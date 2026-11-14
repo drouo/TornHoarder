@@ -20,7 +20,8 @@ from .page_progress import PageProgress
 
 
 def render_shop_scan(api_key: str) -> None:
-    with st.expander("Shop flips: buy in city shops, resell on the market"):
+    st.subheader("City shops: today's 100 buys")
+    with st.container(border=True):
         st.caption(
             "Checks every city shop's current stock against live market listings (about 110 API calls, a minute "
             "or so). Profit is $1 under the cheapest listing (never above Torn's market value, what "

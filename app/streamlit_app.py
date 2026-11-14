@@ -1,4 +1,3 @@
-import re
 import sys
 import time
 from dataclasses import replace
@@ -16,21 +15,24 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from app.paths import (
-    AUTOFILL_PATH, DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
+    DICT_PATH, MUSEUM_PATH, OC_ITEMS_PATH, PRICE_HISTORY_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
     UID_STATS_PATH,
 )
+from app import paths
 from app.ui import autofill_export
 from app.ui.page_progress import PageProgress
 from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
 from app.ui.restock_watch import render_restock_watch
 from app.ui.shop_scan import render_shop_scan
-from app.ui.stock_minimums import render_keep_stocked
+from app.ui.status_board import current_section, render_section_bar, render_sidebar, render_status_board
+from app.ui.stock_minimums import check_keep_stocked, render_keep_stocked
 from app.ui.travel_plan import render_travel_plan
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
 from tma import http_client, museum, my_listings, profile
 from tma.crime_items import refresh_oc_items_if_stale
+from tma.app_status import write_last_run
 from tma.config import load_api_key, save_api_key, clear_api_key, load_sell_prefs, save_sell_prefs
 from tma.sell_plan import SellRules
 from tma.http_client import session_for_requests, shared_bucket
@@ -52,16 +54,6 @@ from tma.item_stats import StatValueModel, load_profiles, sidecar, stat_warnings
 
 MAX_WORKERS = 5
 MARKET_PHASE_TIMEOUT_S = 1200.0
-
-
-def script_version(path) -> Optional[str]:
-    """The @version of the last-built userscript, or None if there isn't one."""
-    try:
-        head = Path(path).read_text(encoding="utf-8")[:2000]
-    except OSError:
-        return None
-    m = re.search(r"@version\s+(\S+)", head)
-    return m.group(1) if m else None
 
 
 def _numeric_market(df_market: pd.DataFrame) -> pd.DataFrame:
@@ -133,6 +125,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+api_key, remember, restarted = render_sidebar()
+if restarted:
+    st.session_state.clear()
+    st.rerun()
+
 if st.session_state["api_key"]:
     _bundle = profile_bundle(st.session_state["api_key"])
     _an = st.session_state.get("analysis") or {}
@@ -144,45 +141,57 @@ if st.session_state["api_key"]:
             f"✈ {_away}. City shops and the Item Market are closed until you're back in Torn, so the shop run "
             "and listing script stay paused. Running the app still works."
         )
-    render_keep_stocked(st.session_state["api_key"], profile_bundle)
-render_shop_scan(st.session_state["api_key"])
-render_restock_watch(st.session_state["api_key"])
-render_travel_plan(st.session_state["api_key"])
+_stocked = check_keep_stocked(st.session_state["api_key"], profile_bundle)
 
-with st.expander("How it works"):
+# The board is drawn now (so it shows even if a run stops early) and again at
+# the end, to show what this run just did.
+_board = st.empty()
+render_status_board(_board, current_section(), 0)
+section = render_section_bar()
+
+
+def finish() -> None:
+    render_status_board(_board, section, 1)
+
+
+if section == "Restock":
+    render_keep_stocked(st.session_state["api_key"], profile_bundle, _stocked)
+    render_shop_scan(st.session_state["api_key"])
+    render_restock_watch(st.session_state["api_key"])
+    finish()
+    st.stop()
+if section == "Travel":
+    render_travel_plan(st.session_state["api_key"])
+    finish()
+    st.stop()
+if section == "Help":
     st.markdown(
         """
 ### How to use the app
 
-1. Go to the Add Listings section of the Item Market.
-2. Copy the item list (the part with item names and quantities).
-3. Paste it in the text box below; prices and untradable/equipped tags are ignored.
-4. Enter your public Torn API key (read-only) so the app can call the itemmarket endpoint.
-5. The app fetches up to the first 100 listings per item and computes suggested prices.
+**The page.** Your API key lives in the sidebar, set once for every tool.
+The **Status** box at the top lists each tool, when it last ran and what
+needs doing; its buttons jump to the right section. The bar under it picks
+a section: **Sell**, **Restock**, **Travel** or **Help**.
 
-Alternatively, switch the source to **API inventory**: the app pulls
-your inventory straight from Torn (`user/inventory`). That needs a
-**Limited-access** API key with the `user` → `inventory` permission.
-**Sell categories** is the list of what you're willing to sell: only those
-categories are pulled and priced, and everything else (Xanax, medical,
-boosters, cans, books, ...) is never listed. Equipped gear is always skipped.
+**Sell.** Click **Run** (top of the section). It pulls your inventory from
+Torn (`user/inventory`; needs a **Limited-access** key with `user` →
+`inventory`), reads weapon/armor stats, checks up to 100 market listings
+per item and prices everything. **Run settings** under it picks the source:
+**API inventory** (with the **Sell categories** you're willing to sell;
+everything else, and equipped gear, is never listed), **Paste items** (the
+Add Listings text), or **Single item** (one name or ID, optionally the `uid`
+of one of your weapon/armor copies to price that exact copy).
 
-**Single item** (in the `Inventory source` selector) prices just that one
-item: type a name or ID and it looks up how many you actually own (one
-inventory category, not a full scan) along with the market price. Add the
-`uid` of one of your own weapon/armor copies to price *that exact copy*
-with its real stats instead of market medians — that skips the inventory
-lookup entirely, since you're pricing one specific copy either way.
+**The Torn script.** After a Run, the sidebar's **Install / update** link
+loads it into Tampermonkey; click it again after later runs for an instant
+update prompt. On Torn it runs the shop run, fills Add Listing rows, shows
+the stock and city-shop badges, flies where the planner says and buys
+abroad. Its live data comes from the app while the app is open.
 
-Each run updates a step tracker (pull items → read copy stats → market
-listings → suggested prices) from start to finish.
-
-Once you've run an analysis, the **Autofill script** tab has a link that
-installs the **Torn autofill script** straight into Tampermonkey — no
-download, no manual reinstall. Click it once to install; after every later
-run, click it again and Tampermonkey shows an instant update prompt with
-the new prices. On the Add Listing page it fills each row's price, adds a
-premium for high-quality weapons/armor, and highlights them.
+**Restock.** Keep stocked minimums, the day's city-shop buys (Scan shops)
+and the restock watch. **Travel.** Where to fly (Plan a trip) and the trip
+log of what you bought abroad.
 
 The **Sell plan** tab gives every item a plan automatically: **Dump**
 cheap junk a few % under the cheapest listing so it clears fast,
@@ -216,126 +225,101 @@ it's remembered next run; the autofill script lists items by their plan.
 - **Fast-sell price:** $1 under the cheapest clean listing — buyers take the cheapest listing first.
         """
     )
+    finish()
+    st.stop()
 
-served = script_version(AUTOFILL_PATH)
-if served and served != __version__:
-    st.warning(
-        f"Your Tampermonkey script is v{served}; this app is v{__version__}. Click **Run** to build the new "
-        "script, then use Tampermonkey's *Check for userscript updates*."
-    )
-
-st.subheader("Item Market listings")
-st.markdown(
-    "[Quick access to your listings](https://www.torn.com/page.php?sid=ItemMarket#/addListing)",
-    unsafe_allow_html=False,
-)
-st.caption(
-    "Run pipeline — progress is tracked live below the button: "
-    "1 pull items · 2 read copy stats · 3 market listings · 4 compute prices"
+st.subheader("Sell your items")
+st.markdown("[Your Item Market listings](https://www.torn.com/page.php?sid=ItemMarket#/addListing)")
+c1, c2 = st.columns([1, 3], vertical_alignment="center")
+submitted = c1.button("Run", type="primary", disabled=not api_key)
+c2.caption(
+    "Pulls your items, reads weapon/armor stats, checks market listings and prices everything; then the Sell "
+    "plan, the Torn script and the status board update. Progress shows below."
 )
 
-# Kept outside the form: widgets inside st.form() only trigger a rerun on
-# submit, so a radio choice made here wouldn't reveal its matching inputs
-# (e.g. the Single item text box) until a first, doomed submit attempt.
-source = st.radio(
-    "Inventory source",
-    ("API inventory", "Paste items", "Single item"),
-    horizontal=True,
-    key="source",
-    help="Pull your inventory from Torn, paste the Add Listings text as before, or check one item only.",
-)
+_saved_rules = SellRules.from_dict(load_sell_prefs()[0])
+_summary = st.session_state.get("source", "API inventory")
+if _summary == "API inventory":
+    _summary += f" · {len(_saved_rules.sell_categories)} sell categories"
+with st.expander(f"Run settings: {_summary}", expanded=not st.session_state.get("has_data") and _summary != "API inventory"):
+    # Kept outside the form: widgets inside st.form() only trigger a rerun on
+    # submit, so a radio choice made here wouldn't reveal its matching inputs
+    # (e.g. the Single item text box) until a first, doomed submit attempt.
+    source = st.radio(
+        "Inventory source",
+        ("API inventory", "Paste items", "Single item"),
+        horizontal=True,
+        key="source",
+        help="Pull your inventory from Torn, paste the Add Listings text as before, or check one item only.",
+    )
 
-if source == "API inventory":
-    st.markdown(
-        "Pulls your inventory via `user/inventory`. Needs a Torn key with the "
-        "**user → inventory** permission. One row is kept per inventory entry; "
-        "equipped items are skipped."
-    )
-    raw = None
-
-    # Sell categories are an allowlist: only these are pulled and priced, so
-    # anything you'd never sell (Xanax, medical, boosters, ...) never even
-    # reaches the autofill script. Saved with the rest of the sell rules.
-    saved_rules, saved_overrides = load_sell_prefs()
-    rules_now = SellRules.from_dict(saved_rules)
-    chosen = st.multiselect(
-        "Sell categories",
-        INVENTORY_CATEGORIES,
-        default=[c for c in rules_now.sell_categories if c in INVENTORY_CATEGORIES],
-        format_func=lambda c: CATEGORY_LABELS.get(c, c),
-        key="sell_categories",
-        help="Only these categories are pulled and priced; everything else is never listed. "
-        "Equipped items are always skipped. Remembered on this computer.",
-    )
-    tracked = st.multiselect(
-        "Track price history for",
-        INVENTORY_CATEGORIES,
-        default=[c for c in rules_now.history_categories if c in INVENTORY_CATEGORIES],
-        format_func=lambda c: CATEGORY_LABELS.get(c, c),
-        key="history_categories",
-        help="Every run adds one row per priced item to data/price_history.csv. Items you own are always "
-        "recorded; these categories add every item in them, owned or not (one extra market call each).",
-    )
-    if tuple(chosen) != rules_now.sell_categories or tuple(tracked) != rules_now.history_categories:
-        save_sell_prefs(
-            replace(rules_now, sell_categories=tuple(chosen), history_categories=tuple(tracked)).to_dict(),
-            saved_overrides,
+    if source == "API inventory":
+        st.markdown(
+            "Pulls your inventory via `user/inventory`. Needs a Torn key with the "
+            "**user → inventory** permission. One row is kept per inventory entry; "
+            "equipped items are skipped."
         )
-    pull_categories: tuple[str, ...] | None = tuple(chosen)
-    history_categories: tuple[str, ...] = tuple(tracked)
-elif source == "Paste items":
-    history_categories = ()
-    raw = st.text_area(
-        "Paste your items",
-        height=220,
-        placeholder="Paste your full Add Listings items text here…",
-    )
-    pull_categories = None
-else:
-    st.markdown(
-        "Checks **one item only** — pick it by name or ID, optionally give a weapon/armor copy's "
-        "`uid` to price that exact copy instead. Handy for spot checks without a full inventory scan."
-    )
-    raw = None
-    pull_categories = None
-    history_categories = ()
-    single_query = st.text_input(
-        "Item name or ID",
-        key="single_query",
-        placeholder="e.g. AK-47 or 477",
-    )
-    single_uid = st.text_input(
-        "Your copy UID (optional)",
-        key="single_uid",
-        placeholder="e.g. 18997743406",
-        help="The `uid` of one of your weapon/armor copies (from `torn/{uid}?selections=itemdetails`). "
-        "Pricing the copy uses its real stats instead of market medians.",
-    )
+        raw = None
 
-with st.form("input_form", clear_on_submit=False):
-    api_key = st.text_input(
-        "Enter your Torn API key",
-        value=st.session_state["api_key"],
-        key="api_key_input",
-        type="password",
-        help="Stored locally in ~/.tma_config.json when \"Remember API key\" is on.",
-    )
+        # Sell categories are an allowlist: only these are pulled and priced, so
+        # anything you'd never sell (Xanax, medical, boosters, ...) never even
+        # reaches the autofill script. Saved with the rest of the sell rules.
+        saved_rules, saved_overrides = load_sell_prefs()
+        rules_now = SellRules.from_dict(saved_rules)
+        chosen = st.multiselect(
+            "Sell categories",
+            INVENTORY_CATEGORIES,
+            default=[c for c in rules_now.sell_categories if c in INVENTORY_CATEGORIES],
+            format_func=lambda c: CATEGORY_LABELS.get(c, c),
+            key="sell_categories",
+            help="Only these categories are pulled and priced; everything else is never listed. "
+            "Equipped items are always skipped. Remembered on this computer.",
+        )
+        tracked = st.multiselect(
+            "Track price history for",
+            INVENTORY_CATEGORIES,
+            default=[c for c in rules_now.history_categories if c in INVENTORY_CATEGORIES],
+            format_func=lambda c: CATEGORY_LABELS.get(c, c),
+            key="history_categories",
+            help="Every run adds one row per priced item to data/price_history.csv. Items you own are always "
+            "recorded; these categories add every item in them, owned or not (one extra market call each).",
+        )
+        if tuple(chosen) != rules_now.sell_categories or tuple(tracked) != rules_now.history_categories:
+            save_sell_prefs(
+                replace(rules_now, sell_categories=tuple(chosen), history_categories=tuple(tracked)).to_dict(),
+                saved_overrides,
+            )
+        pull_categories: tuple[str, ...] | None = tuple(chosen)
+        history_categories: tuple[str, ...] = tuple(tracked)
+    elif source == "Paste items":
+        history_categories = ()
+        raw = st.text_area(
+            "Paste your items",
+            height=220,
+            placeholder="Paste your full Add Listings items text here…",
+        )
+        pull_categories = None
+    else:
+        st.markdown(
+            "Checks **one item only** — pick it by name or ID, optionally give a weapon/armor copy's "
+            "`uid` to price that exact copy instead. Handy for spot checks without a full inventory scan."
+        )
+        raw = None
+        pull_categories = None
+        history_categories = ()
+        single_query = st.text_input(
+            "Item name or ID",
+            key="single_query",
+            placeholder="e.g. AK-47 or 477",
+        )
+        single_uid = st.text_input(
+            "Your copy UID (optional)",
+            key="single_uid",
+            placeholder="e.g. 18997743406",
+            help="The `uid` of one of your weapon/armor copies (from `torn/{uid}?selections=itemdetails`). "
+            "Pricing the copy uses its real stats instead of market medians.",
+        )
 
-    remember = st.checkbox(
-        "Remember API key on this computer",
-        value=bool(st.session_state["api_key"]),
-        key="remember_key",
-    )
-
-    c1, c2 = st.columns([2, 1])
-    with c2:
-        restarted = st.form_submit_button("↻ Restart")
-    with c1:
-        submitted = st.form_submit_button("Run")
-
-if restarted:
-    st.session_state.clear()
-    st.rerun()
 
 if submitted:
     if not DICT_PATH.exists():
@@ -350,7 +334,6 @@ if submitted:
     if source == "Single item" and not st.session_state.get("single_query", "").strip():
         st.error("Enter an item name or ID to check.")
         st.stop()
-    api_key = api_key.strip()
     if not api_key:
         st.error("API key required.")
         st.stop()
@@ -728,6 +711,7 @@ if submitted:
             ],
         }
         st.session_state["has_data"] = True
+        write_last_run(paths.LAST_RUN_PATH, len(per_id_rows), source)
 
         run_box.update(
             label=f"Done · priced {len(per_id_rows)} distinct items "
@@ -738,3 +722,4 @@ if submitted:
 
 if st.session_state.get("has_data"):
     render_results(st.session_state["analysis"])
+finish()

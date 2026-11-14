@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import http.server
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
+from .foreign_stock import recent_restocks
 from .shops import record_shop_report
+from .trips import record_buy
 
 DEFAULT_PORT = 9999
 SCRIPT_NAME = "tornhoarder.user.js"
@@ -29,6 +32,7 @@ MAX_REPORT_BYTES = 200_000
 def _make_handler(
     script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
     travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
+    trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     # JSON the app writes for the userscript to fetch, with what to serve before it exists.
     feeds = {
@@ -39,9 +43,13 @@ def _make_handler(
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
-            if self.path in feeds:
-                path, empty = feeds[self.path]
-                body = path.read_bytes() if path and path.exists() else empty
+            if self.path in feeds or self.path == "/restocks":
+                if self.path == "/restocks":  # restock alerts, from the foreign stock log
+                    found = recent_restocks(foreign_path, time.time()) if foreign_path else []
+                    body = json.dumps({"checked": int(time.time()), "restocks": found}).encode()
+                else:
+                    path, empty = feeds[self.path]
+                    body = path.read_bytes() if path and path.exists() else empty
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Cache-Control", "no-cache, max-age=0")
@@ -67,7 +75,10 @@ def _make_handler(
             self.wfile.write(content)
 
         def do_POST(self) -> None:  # noqa: N802 (stdlib method name)
-            if self.path != "/shop-report" or reports_path is None:
+            # /shop-report: a city shop's Sell page; /trip-buy: a buy abroad.
+            sinks = {"/shop-report": (reports_path, record_shop_report), "/trip-buy": (trips_path, record_buy)}
+            path, record = sinks.get(self.path, (None, None))
+            if path is None:
                 self.send_error(404)
                 return
             length = int(self.headers.get("Content-Length") or 0)
@@ -75,8 +86,8 @@ def _make_handler(
                 self.send_error(413)
                 return
             try:
-                record_shop_report(reports_path, json.loads(self.rfile.read(length)))
-            except (ValueError, TypeError):
+                record(path, json.loads(self.rfile.read(length)))
+            except (ValueError, TypeError, KeyError):
                 self.send_error(400)
                 return
             self.send_response(204)
@@ -91,6 +102,8 @@ def _make_handler(
 def build_server(
     script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None,
     status_path: Optional[Path] = None, travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
+    trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
-    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(script_path, reports_path, status_path, travel_path, plan_path))
+    return http.server.HTTPServer(("127.0.0.1", port), _make_handler(
+        script_path, reports_path, status_path, travel_path, plan_path, trips_path, foreign_path))

@@ -103,6 +103,26 @@ def run(log: StockLog, session: requests.Session, interval_s: int = DEFAULT_INTE
         sleep(interval_s)
 
 
+def recent_restocks(stock_path: Path, now: float, window_s: int = 3600) -> list[dict]:
+    """Items abroad that went from sold out to in stock in the last
+    `window_s` seconds and are still in stock, newest first."""
+    last: dict[tuple[str, int], dict] = {}
+    back: dict[tuple[str, int], int] = {}
+    for r in sorted(_read(stock_path), key=lambda r: int(r["seen"])):
+        key = (r["country"], int(r["item_id"]))
+        prev = last.get(key)
+        if prev is not None and int(prev["quantity"]) == 0 and int(r["quantity"]) > 0:
+            back[key] = int(r["seen"])
+        last[key] = r
+    out = []
+    for key, seen in back.items():
+        r = last[key]
+        if seen >= now - window_s and int(r["quantity"]) > 0:
+            out.append({"country": COUNTRIES.get(key[0], key[0]), "code": key[0], "item_id": key[1],
+                        "name": r["item_name"], "qty": int(r["quantity"]), "cost": int(r["cost"]), "seen": seen})
+    return sorted(out, key=lambda x: -x["seen"])
+
+
 def _read(path: Path) -> list[dict]:
     try:
         with Path(path).open(newline="", encoding="utf-8") as f:

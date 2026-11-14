@@ -13,13 +13,29 @@ from tma.http_client import session_for_requests, shared_bucket
 from tma.item_stats import load_profiles
 from tma.market_fetch import fetch_all_item_markets
 from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices, write_prices
+from tma.trips import load_buys, trip_table
 
 from .. import paths
 from .page_progress import PageProgress
 
 
+def render_trip_log() -> None:
+    buys = load_buys(paths.TRIP_BUYS_PATH)
+    if not buys:
+        return
+    got = st.session_state.get("travel_plan")
+    df = trip_table(buys, got["sell"] if got else None)
+    st.markdown("**Trip log**")
+    money_cols = [c for c in ("Spent", "Expected profit", "Profit at today's prices") if c in df.columns]
+    st.dataframe(df, width="stretch", hide_index=True,
+                 column_config={c: st.column_config.NumberColumn(format="compact") for c in money_cols})
+    st.caption("What the shop page abroad saw land in your bag. **Expected profit** uses the app's sell prices "
+               "when you bought; **Profit at today's prices** uses the latest Plan a trip check.")
+
+
 def render_travel_plan(api_key: str) -> None:
     with st.expander("Where to fly"):
+        render_trip_log()
         h = load_history(paths.FOREIGN_STOCK_PATH, paths.FOREIGN_UPDATES_PATH)
         if not h.obs:
             st.info("No foreign stock history yet. Start the logger: `python tools/log_foreign_stock.py`.")

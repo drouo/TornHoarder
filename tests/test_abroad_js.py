@@ -39,7 +39,7 @@ const rows = page.rows.map(r => {
   const buy = el({ click() { pressed.push({ id: r.id, qty: box.value, hidden: hidden.value }); } });
   const label = el({ textContent: "stock" });
   label.parentElement = { textContent: "stock" + r.stock };
-  return el({
+  const row = el({
     querySelector(sel) {
       if (sel === "img") return el({ attrs: { src: "/images/items/" + r.id + "/medium.png" } });
       if (/itemNameButton/.test(sel)) return el({ textContent: r.name });
@@ -51,17 +51,28 @@ const rows = page.rows.map(r => {
     },
     querySelectorAll: sel => (/srOnly/.test(sel) ? [label] : []),
   });
+  buy.closest = s => (/row___/.test(s) ? row : null);
+  row.buy = buy;
+  return row;
 });
+const bag = n => "You have purchased " + n + " / 18 items so far.";
+let onClick = null;
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
-  body: el({ dataset: { abroad: "true", traveling: "false" }, textContent: "You have purchased " + page.bought + " / 18 items so far." }),
+  body: el({ dataset: { abroad: "true", traveling: "false", country: "mexico" }, textContent: bag(page.bought) }),
   getElementById: () => null,
   querySelector: s => (s === "#user-money" ? el({ attrs: { "data-money": String(page.wallet) } }) : null),
   querySelectorAll: s => (/row___/.test(s) ? rows : []),
   createTextNode: t => ({ textContent: t, kids: [] }),
+  addEventListener(t, f) { if (t === "click") onClick = f; },
 };
-global.GM_xmlhttpRequest = o => o.onload({ responseText: JSON.stringify(page.prices) });
-global.setInterval = () => 0;
+const posts = [];
+global.GM_xmlhttpRequest = o => {
+  if (o.method === "POST") { posts.push({ url: o.url, data: JSON.parse(o.data) }); return; }
+  o.onload({ responseText: JSON.stringify(/travel-prices$/.test(o.url) ? page.prices : {}) });
+};
+const ticks = [];
+global.setInterval = f => { ticks.push(f); return 0; };
 global.setTimeout = () => 0;
 global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
@@ -69,6 +80,15 @@ const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
 const btn = made.find(e => e.id === "th-abroad-btn");
 const out = { button: btn.textContent, panel: made.map(text).join("\n") };
 if (page.click) { btn.onclick(); out.pressed = pressed; }
+if (page.handBuy != null) { onClick({ target: { closest: () => rows[page.handBuy].buy } }); }
+if (page.landed != null) {
+  // Torn's bag count goes up once the buy goes through.
+  document.body.textContent = bag(page.bought + page.landed);
+  ticks.forEach(f => f());
+  out.button = btn.textContent;
+  out.panel = made.map(text).join("\n");
+  out.posts = posts;
+}
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -105,6 +125,24 @@ class AbroadJsTest(unittest.TestCase):
     def test_fills_what_you_can_still_carry_and_presses_buy(self):
         out = self.run_page(bought=11, click=True)
         self.assertEqual(out["pressed"], [{"id": 261, "qty": "7", "hidden": "7"}])
+
+    def test_a_buy_is_confirmed_and_logged_once_the_bag_count_goes_up(self):
+        out = self.run_page(bought=11, click=True, landed=7)
+        self.assertIn("✓ Bought 7 × Wolverine Plushie · $140 (+$209,860 expected)", out["panel"])
+        self.assertEqual(len(out["posts"]), 1)
+        self.assertTrue(out["posts"][0]["url"].endswith("/trip-buy"))
+        self.assertEqual({k: v for k, v in out["posts"][0]["data"].items() if k != "ts"},
+                         {"country": "mexico", "item_id": 261, "item_name": "Wolverine Plushie",
+                          "qty": 7, "cost": 20, "sell": 30_000})
+
+    def test_buys_by_hand_are_logged_too(self):
+        out = self.run_page(handBuy=3, landed=5)
+        self.assertEqual(out["posts"][0]["data"]["item_name"], "Hockey Stick")
+        self.assertEqual(out["posts"][0]["data"]["qty"], 5)
+
+    def test_nothing_logged_until_the_bag_changes(self):
+        out = self.run_page(click=True, landed=0)
+        self.assertEqual(out["posts"], [])
 
     def test_wallet_limits_the_amount(self):
         rows = [{"id": 206, "name": "Xanax", "cost": 775_563, "stock": 40}]

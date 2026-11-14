@@ -2208,6 +2208,123 @@ TEMPLATE = """\
     }
 
     // ---- Abroad: fill your bag with what pays best -------------------------
+    // ---- Restock alerts: an item abroad is back in stock -------------------
+    // The app's server reads the foreign stock log for items that went from
+    // sold out to in stock in the last hour. A chime and a pill when one is
+    // worth a trip: a full bag of it clears RESTOCK_MIN at the app's prices.
+    var BAG_KEY = "tornhoarder.bagSize";       // learned on the shop page abroad
+    var CHIMED_KEY = "tornhoarder.restockChimed";
+    var HIDDEN_KEY = "tornhoarder.restockHidden";
+    var RESTOCK_MIN = 100000;
+
+    function restockAlert() {
+        var sell = {};
+        var list = [];
+        var pill = document.createElement("div");
+        pill.id = "th-restock-badge";
+        pill.style.cssText = "position:fixed;right:12px;top:90px;z-index:999997;max-width:340px;padding:6px 12px;" +
+            "border-radius:12px;background:rgba(21,101,192,.95);color:#fff;font:bold 13px/1.4 Arial,sans-serif;" +
+            "box-shadow:0 2px 10px rgba(0,0,0,.5);display:none;";
+        document.body.appendChild(pill);
+
+        function keys(k) {
+            return readPref(k, "").split(",").filter(Boolean);
+        }
+
+        function remember(k, add) {
+            writePref(k, keys(k).concat(add).slice(-50).join(","));
+        }
+
+        function hits() {
+            var bag = parseInt(readPref(BAG_KEY, "18"), 10) || 18;
+            return list.map(function (r) {
+                var each = (Number(sell[r.item_id]) || 0) - r.cost;
+                return { r: r, key: r.code + ":" + r.item_id + ":" + r.seen, load: sell[r.item_id] ? each * Math.min(r.qty, bag) : 0 };
+            }).filter(function (h) {
+                return h.load >= RESTOCK_MIN && keys(HIDDEN_KEY).indexOf(h.key) < 0;
+            }).sort(function (a, b) { return b.load - a.load; });
+        }
+
+        function chime() {
+            try {
+                var Ctx = window.AudioContext || window.webkitAudioContext;
+                var ctx = new Ctx();
+                [880, 1320].forEach(function (f, i) {
+                    var o = ctx.createOscillator();
+                    var g = ctx.createGain();
+                    o.frequency.value = f;
+                    g.gain.value = 0.15;
+                    o.connect(g);
+                    g.connect(ctx.destination);
+                    o.start(ctx.currentTime + i * 0.18);
+                    o.stop(ctx.currentTime + i * 0.18 + 0.15);
+                });
+            } catch (e) { /* no sound: the pill still shows */ }
+        }
+
+        function draw() {
+            var found = hits();
+            if (awayMessage() || !found.length) {
+                pill.style.display = "none";
+                return;
+            }
+            var fresh = found.filter(function (h) { return keys(CHIMED_KEY).indexOf(h.key) < 0; });
+            if (fresh.length) {
+                chime();
+                remember(CHIMED_KEY, fresh.map(function (h) { return h.key; }));
+            }
+            pill.style.display = "block";
+            pill.textContent = "";
+            pill.appendChild(document.createTextNode("🔔 Back in stock abroad"));
+            found.slice(0, 3).forEach(function (h) {
+                var line = document.createElement("div");
+                line.style.cssText = "font-weight:normal;margin-top:4px;";
+                var mins = Math.max(0, Math.round((Date.now() / 1000 - h.r.seen) / 60));
+                line.appendChild(document.createTextNode(h.r.name + " in " + h.r.country + ": " + h.r.qty.toLocaleString("en-US") +
+                    " in stock (" + mins + " min ago), +" + fmtMoney(h.load) + " a bag "));
+                var a = document.createElement("a");
+                a.href = "https://www.torn.com/page.php?sid=travel&thfly=" + encodeURIComponent(h.r.country);
+                a.textContent = "Fly ✈";
+                a.style.cssText = "color:#ffeb3b;";
+                line.appendChild(a);
+                pill.appendChild(line);
+            });
+            var x = document.createElement("span");
+            x.textContent = "dismiss";
+            x.style.cssText = "color:#ffeb3b;text-decoration:underline;cursor:pointer;font-weight:normal;";
+            x.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                remember(HIDDEN_KEY, found.map(function (h) { return h.key; }));
+                draw();
+            });
+            pill.appendChild(x);
+        }
+
+        function get(feed, done) {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, feed),
+                onload: function (res) {
+                    try {
+                        done(JSON.parse(res.responseText));
+                    } catch (e) { /* keep what we have */ }
+                    draw();
+                }
+            });
+        }
+
+        function refresh() {
+            get("travel-prices", function (p) { sell = p.sell || {}; });
+            get("restocks", function (r) { list = r.restocks || []; });
+        }
+
+        if (typeof GM_xmlhttpRequest === "undefined") {
+            return;
+        }
+        refresh();
+        setInterval(refresh, 120000);
+    }
+
     // On the shop page abroad, ranks what's in stock by the app's sell prices
     // (Where to fly → Plan a trip). Click 1 fills the best item's amount (what
     // you can still carry and afford) and presses its Buy; click 2 confirms if
@@ -2217,6 +2334,10 @@ TEMPLATE = """\
         var pending = null;
         var busyUntil = 0;
         var note = "";
+        var lastBuy = null;   // the row whose Buy was pressed last, by us or by hand
+        var buyAt = 0;
+        var bagSeen = null;   // items in the bag at the last look
+        var bought = [];      // what landed in the bag this visit
         var btn = greenButton("th-abroad-btn");
         var panel = infoPanel();
         var dock = makeDock(btn, panel);
@@ -2230,14 +2351,12 @@ TEMPLATE = """\
             return m ? { bought: num(m[1]), max: num(m[2]) } : null;
         }
 
-        function rows() {
-            var out = [];
-            Array.prototype.forEach.call(document.querySelectorAll("[class*=row___]"), function (row) {
+        function rowInfo(row) {
                 var box = row.querySelector("input.input-money:not([type=hidden])");
                 var img = row.querySelector("img");
                 var id = img && (/\\/images\\/items\\/([0-9]+)\\//.exec(img.getAttribute("src") || "") || [])[1];
                 if (!box || !id) {
-                    return;
+                    return null;
                 }
                 var nameEl = row.querySelector("[class*=itemNameButton]");
                 var priceEl = row.querySelector("[class*=displayPrice]");
@@ -2246,14 +2365,17 @@ TEMPLATE = """\
                 })[0];
                 var cost = priceEl ? num(priceEl.textContent) : 0;
                 var sell = Number(prices.sell[id]) || 0;
-                out.push({
+                return {
                     id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, box: box,
                     hidden: row.querySelector("input.input-money[type=hidden]"),
                     buy: row.querySelector("button[class*=buyButton]"),
                     cost: cost, stock: stockEl ? num(stockEl.parentElement.textContent) : 0, profit: sell - cost
-                });
-            });
-            return out.filter(function (r) { return r.profit > 0 && r.cost > 0; })
+                };
+        }
+
+        function rows() {
+            var out = Array.prototype.map.call(document.querySelectorAll("[class*=row___]"), rowInfo);
+            return out.filter(function (r) { return r; }).filter(function (r) { return r.profit > 0 && r.cost > 0; })
                 .sort(function (a, b) { return b.profit - a.profit; });
         }
 
@@ -2271,8 +2393,55 @@ TEMPLATE = """\
             return null;
         }
 
+        // A buy counts once the bag count goes up, not when Buy is pressed:
+        // that's the confirmation, and what goes in the trip log.
+        function landed(n) {
+            var r = lastBuy;
+            pending = null;
+            note = "";
+            if (!r) {
+                bought.push("✓ " + n + " item(s) added to your bag");
+                return;
+            }
+            bought.push("✓ Bought " + n + " × " + r.name + " · " + fmtMoney(n * r.cost) +
+                (r.profit > 0 ? " (+" + fmtMoney(n * r.profit) + " expected)" : ""));
+            if (typeof GM_xmlhttpRequest !== "undefined") {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: CFG.reportUrl.replace(/shop-report$/, "trip-buy"),
+                    headers: { "Content-Type": "application/json" },
+                    data: JSON.stringify({
+                        ts: Math.floor(Date.now() / 1000), country: document.body.dataset.country || "",
+                        item_id: Number(r.id), item_name: r.name, qty: n, cost: r.cost, sell: Number(prices.sell[r.id]) || 0
+                    })
+                });
+            }
+        }
+
+        function watchBag(cap) {
+            if (!cap) {
+                return;
+            }
+            if (bagSeen != null && cap.bought > bagSeen) {
+                landed(cap.bought - bagSeen);
+            }
+            bagSeen = cap.bought;
+            writePref(BAG_KEY, String(cap.max));
+        }
+
+        document.addEventListener("click", function (ev) {
+            var b = ev.target && ev.target.closest ? ev.target.closest("button[class*=buyButton]") : null;
+            var row = b && b.closest("[class*=row___]");
+            var info = row && rowInfo(row);
+            if (info) {
+                lastBuy = info;
+                buyAt = Date.now();
+            }
+        }, true);
+
         function render() {
             var cap = capacity();
+            watchBag(cap);
             var all = rows();
             var lines = [];
             if (!prices.checked) {
@@ -2290,8 +2459,15 @@ TEMPLATE = """\
             if (cap) {
                 lines.push("Bag: " + cap.bought + " of " + cap.max + " bought.");
             }
-            setLines(panel, lines);
+            setLines(panel, lines.concat(bought));
             var c = findConfirm();
+            if (pending && !c && Date.now() - buyAt > 4000 && !note) {
+                note = "if Torn asks are you sure, confirm it there";
+                if (/are you sure/i.test(document.body.textContent || "")) {
+                    console.log("[TornHoarder] abroad confirm not recognized; buttons: " + Array.prototype.map.call(
+                        document.querySelectorAll("button"), function (b) { return (b.textContent || "").trim(); }).join(" | "));
+                }
+            }
             var n = next(all);
             if (Date.now() < busyUntil) {
                 btn.textContent = "Buying…";
@@ -2328,6 +2504,8 @@ TEMPLATE = """\
             }
             setMoney(n.row.box, n.row.hidden, n.qty);
             pending = n;
+            lastBuy = n.row;
+            buyAt = Date.now();
             if (!usable(n.row.buy)) {
                 note = "amount filled, press Buy yourself";
                 render();
@@ -2361,6 +2539,7 @@ TEMPLATE = """\
 
     stockBadge();
     cityBadge();
+    restockAlert();
     if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
         watchCityBuys();
     }

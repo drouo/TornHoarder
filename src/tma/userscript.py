@@ -2131,6 +2131,82 @@ TEMPLATE = """\
         console.log("[TornHoarder] ammo mode v" + VER);
     }
 
+    // ---- Travel agency: fly where the app's planner says ------------------
+    // The app links here with &thfly=<Country>. Click 1 picks the country on
+    // the map; click 2 presses Travel, only once Torn's "Are you sure you want
+    // to travel to <Country>…?" names it. Uses whatever flight type is chosen.
+    function flyMode(country) {
+        var busyUntil = 0;
+        var btn = greenButton("th-fly-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+
+        function root() {
+            return document.getElementById("travel-root") || document.body;
+        }
+
+        function confirmText() {
+            var m = /travel to ([A-Za-z ]+?) on an? [a-z ]+?flight\\?[^?]*?reach your destination in around ([^.]+)\\./.exec(root().textContent || "");
+            return m ? { country: m[1], time: m[2] } : null;
+        }
+
+        function travelButton() {
+            return Array.prototype.filter.call(root().querySelectorAll("button.torn-btn"), function (b) {
+                return /^travel$/i.test((b.textContent || "").trim());
+            })[0] || null;
+        }
+
+        function pin() {
+            return document.querySelector('button[class*=pin___][aria-label="' + country + '"]');
+        }
+
+        function render() {
+            if (document.body.dataset.traveling === "true") {
+                btn.textContent = "✈ On the way to " + country + ". The shop page there will have your buy button.";
+                setLines(panel, []);
+                return;
+            }
+            var c = confirmText();
+            var ready = c && c.country === country;
+            setLines(panel, [ready ? "Flight to " + country + ": about " + c.time + ", by the flight type picked on the page." :
+                "The app's planner picked " + country + "."]);
+            if (Date.now() < busyUntil) {
+                btn.textContent = "Taking off…";
+            } else if (ready) {
+                btn.textContent = "✈ Travel to " + country + " (" + c.time + ")";
+            } else if (pin()) {
+                btn.textContent = "Pick " + country + " on the map";
+            } else {
+                btn.textContent = "Can't find " + country + " on this page";
+            }
+        }
+
+        btn.addEventListener("click", function () {
+            if (Date.now() < busyUntil) {
+                return;
+            }
+            if (document.body.dataset.traveling === "true") {
+                dock.close();
+                return;
+            }
+            var c = confirmText();
+            if (c && c.country === country) {
+                var t = travelButton();
+                if (usable(t)) {
+                    busyUntil = Date.now() + 3000;
+                    t.click();
+                }
+            } else if (pin()) {
+                pin().click();
+            }
+            render();
+        });
+
+        render();
+        setInterval(render, 700);
+        console.log("[TornHoarder] fly mode v" + VER + ": " + country);
+    }
+
     // ---- Abroad: fill your bag with what pays best -------------------------
     // On the shop page abroad, ranks what's in stock by the app's sell prices
     // (Where to fly → Plan a trip). Click 1 fills the best item's amount (what
@@ -2287,6 +2363,13 @@ TEMPLATE = """\
     cityBadge();
     if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
         watchCityBuys();
+    }
+
+    // The app's "Fly" link: the travel agency, set to go where the planner says.
+    var flySpec = /[?&]thfly=([^&]+)/.exec(location.search);
+    if (flySpec && location.pathname.indexOf("/page.php") === 0 && document.body.dataset.abroad !== "true") {
+        flyMode(decodeURIComponent(flySpec[1]));
+        return;
     }
 
     // The shop page abroad (Torn sends you there on landing).

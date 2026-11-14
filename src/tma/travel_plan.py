@@ -19,6 +19,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -26,11 +27,13 @@ from .foreign_stock import COUNTRIES
 from .my_listings import market_listings
 from .sell_plan import MARKET_FEE
 
-# One-way flight, standard class, in minutes; other classes scale it.
+# One-way flight, standard class, in minutes, as Torn's travel agency shows
+# them (travel perks included); the other classes scale it.
 FLIGHT_MIN = {
-    "mex": 26, "cay": 35, "can": 41, "haw": 134, "uni": 159, "arg": 167,
-    "swi": 175, "jap": 225, "chi": 242, "uae": 271, "sou": 297,
+    "mex": 24, "cay": 33, "can": 39, "haw": 127, "uni": 151, "arg": 158,
+    "swi": 166, "jap": 213, "chi": 229, "uae": 257, "sou": 282,
 }
+FLY_URL = "https://www.torn.com/page.php?sid=travel&thfly={country}"
 TRAVEL_SPEED = {"Standard": 1.0, "Airstrip": 0.7, "Private jet": 0.5, "Business class": 0.3}
 MATCH_S = 15 * 60  # an observation this close to the landing time stands in for it
 MIN_SAMPLES = 10  # fewer than this and the odds fall back to "any state now"
@@ -178,6 +181,7 @@ def plan_trips(h: History, now: float, sell: dict[int, float], cap: int = 18, sp
             "Backups": ", ".join(f"{h.names.get(o['id'])} ({o['now']})" for o in options[1:]),
             "Odds from": f"{len(best['samples'])} samples, {best['basis']}",
             "Data age (min)": round(max(0.0, now - obs[-1]) / 60),
+            "Fly": FLY_URL.format(country=quote(COUNTRIES.get(country, country))),
             "best_id": best["id"],
             "code": country,
         })

@@ -32,7 +32,7 @@ def render_travel_plan(api_key: str) -> None:
         )
         c1, c2 = st.columns(2)
         cap = c1.number_input("Items you can carry", min_value=1, max_value=100, value=18, key="travel_cap")
-        kind = c2.selectbox("Travel by", list(TRAVEL_SPEED), index=list(TRAVEL_SPEED).index("Private jet"), key="travel_kind")
+        kind = c2.selectbox("Travel by", list(TRAVEL_SPEED), index=list(TRAVEL_SPEED).index("Airstrip"), key="travel_kind")
         if st.button("Plan a trip", key="plan_trip", disabled=not api_key):
             refs = {int(k): v.get("market_price") or 0 for k, v in load_profiles(paths.PROFILES_PATH).items()}
             ids = candidates(h, refs)
@@ -62,15 +62,17 @@ def render_travel_plan(api_key: str) -> None:
             f"**Fly to {top['Country']}** for {top['Best item']}: about **{money(top['Expected trip profit'])}** "
             f"a trip, **{money(top['Per hour'])}/hour** ({top['Chance of a full load']}% chance all {int(cap)} are "
             f"still there when you land). Prices checked at {got['when']}.".replace("$", "\\$")
+            + f"  \n[**Fly to {top['Country']} ✈**]({top['Fly']})"
         )
         st.dataframe(
             df, width="stretch", hide_index=True,
-            column_order=("Country", "Per hour", "Expected trip profit", "Best item", "Profit / unit", "In stock now",
+            column_order=("Fly", "Country", "Per hour", "Expected trip profit", "Best item", "Profit / unit", "In stock now",
                           "Chance of a full load", "Flight (min)", "Backups", "Odds from", "Data age (min)"),
             column_config={
                 **{c: st.column_config.NumberColumn(format="compact") for c in ("Per hour", "Expected trip profit", "Profit / unit")},
                 "Chance of a full load": st.column_config.NumberColumn(format="%d%%"),
                 "In stock now": st.column_config.NumberColumn(format="localized"),
+                "Fly": st.column_config.LinkColumn(display_text="Fly ✈", help="Opens Torn's travel agency set to fly there"),
             },
         )
         st.caption(

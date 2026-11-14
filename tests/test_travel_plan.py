@@ -55,6 +55,8 @@ class TravelPlanTest(unittest.TestCase):
             self.assertEqual(mex["Best item"], "Flipper")
             self.assertEqual(mex["Chance of a full load"], 0)
             self.assertEqual(mex["Expected trip profit"], 18 * 500)
+            self.assertEqual(can["Fly"], "https://www.torn.com/page.php?sid=travel&thfly=Canada")
+            self.assertEqual(can["Flight (min)"], 20)  # 39 standard, halved
 
     def test_sell_price_is_under_the_cheapest_listing_capped_at_market_value(self):
         rows = {1: {"price_1": 12_000, "amount_1": 3}, 2: {"price_1": 9000, "amount_1": 1}, 3: {}}

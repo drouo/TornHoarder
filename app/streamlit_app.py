@@ -26,6 +26,7 @@ from app.ui.results import render_results
 from app.ui.restock_watch import render_restock_watch
 from app.ui.shop_scan import render_shop_scan
 from app.ui.stock_minimums import render_keep_stocked
+from app.ui.travel_plan import render_travel_plan
 from tma import __version__
 from tma.catalog import refresh_catalog_if_stale
 from tma import http_client, museum, my_listings, profile
@@ -146,6 +147,7 @@ if st.session_state["api_key"]:
     render_keep_stocked(st.session_state["api_key"], profile_bundle)
 render_shop_scan(st.session_state["api_key"])
 render_restock_watch(st.session_state["api_key"])
+render_travel_plan(st.session_state["api_key"])
 
 with st.expander("How it works"):
     st.markdown(

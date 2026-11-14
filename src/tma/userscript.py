@@ -2366,7 +2366,7 @@ TEMPLATE = """\
                 var cost = priceEl ? num(priceEl.textContent) : 0;
                 var sell = Number(prices.sell[id]) || 0;
                 return {
-                    id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, box: box,
+                    id: id, el: row, name: nameEl ? nameEl.textContent.trim() : "item " + id, box: box,
                     hidden: row.querySelector("input.input-money[type=hidden]"),
                     buy: row.querySelector("button[class*=buyButton]"),
                     cost: cost, stock: stockEl ? num(stockEl.parentElement.textContent) : 0, profit: sell - cost
@@ -2391,6 +2391,39 @@ TEMPLATE = """\
                 }
             }
             return null;
+        }
+
+        // After Buy, Torn swaps the row's controls for its "are you sure"
+        // question, so the row no longer looks buyable. Until the bag count
+        // goes up (or PENDING_MS passes) the button stays on that item and
+        // looks for the confirm button, page-wide or inside the row.
+        var PENDING_MS = 20000;
+        var logged = false;
+
+        function pendingConfirm() {
+            var c = findConfirm();
+            if (c || !pending) {
+                return c;
+            }
+            var row = pending.row.el;
+            var buttons = Array.prototype.filter.call(row.querySelectorAll("button"), function (b) {
+                return b !== pending.row.buy && b.offsetParent !== null;
+            });
+            var label = function (b) { return (b.textContent || "").trim(); };
+            return buttons.filter(function (b) { return /^(yes|confirm)/i.test(label(b)); })[0] ||
+                (/are you sure|confirm/i.test(row.textContent || "") ?
+                    buttons.filter(function (b) { return /^buy/i.test(label(b)); })[0] : null) || null;
+        }
+
+        function logConfirm() {
+            if (logged || !pending) {
+                return;
+            }
+            logged = true;
+            console.log("[TornHoarder] abroad confirm not recognized. Row: " + (pending.row.el.textContent || "").trim() +
+                " · buttons on the page: " + Array.prototype.map.call(document.querySelectorAll("button"), function (b) {
+                    return (b.textContent || "").trim();
+                }).join(" | "));
         }
 
         // A buy counts once the bag count goes up, not when Buy is pressed:
@@ -2460,19 +2493,20 @@ TEMPLATE = """\
                 lines.push("Bag: " + cap.bought + " of " + cap.max + " bought.");
             }
             setLines(panel, lines.concat(bought));
-            var c = findConfirm();
-            if (pending && !c && Date.now() - buyAt > 4000 && !note) {
-                note = "if Torn asks are you sure, confirm it there";
-                if (/are you sure/i.test(document.body.textContent || "")) {
-                    console.log("[TornHoarder] abroad confirm not recognized; buttons: " + Array.prototype.map.call(
-                        document.querySelectorAll("button"), function (b) { return (b.textContent || "").trim(); }).join(" | "));
-                }
+            if (pending && Date.now() - buyAt > PENDING_MS) {
+                pending = null;
+                note = "Torn didn't take it; check the page and try again";
             }
+            var c = pendingConfirm();
             var n = next(all);
             if (Date.now() < busyUntil) {
                 btn.textContent = "Buying…";
-            } else if (c && pending) {
+            } else if (pending && c) {
                 btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.row.name + " · " + fmtMoney(pending.qty * pending.row.cost);
+            } else if (pending) {
+                // Never move on to another item while Torn may be asking about this one.
+                btn.textContent = "Confirm " + pending.qty + " × " + pending.row.name + " on Torn's page";
+                logConfirm();
             } else if (n) {
                 btn.textContent = "Buy " + n.qty + " × " + n.row.name + " · " + fmtMoney(n.qty * n.row.cost) +
                     " (+" + fmtMoney(n.qty * n.row.profit) + ")";
@@ -2489,11 +2523,12 @@ TEMPLATE = """\
                 return;
             }
             note = "";
-            var c = findConfirm();
-            if (c && pending) {
-                pending = null;
-                busyUntil = Date.now() + 2000;
-                c.click();
+            if (pending) {
+                var c = pendingConfirm();
+                if (c) {
+                    busyUntil = Date.now() + 2000;
+                    c.click();
+                }
                 render();
                 return;
             }

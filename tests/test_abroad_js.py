@@ -34,9 +34,15 @@ global.location = { pathname: "/page.php", search: "?sid=travel", hash: "", href
 global.Event = function () {};
 global.HTMLInputElement = { prototype: {} };
 const pressed = [];
+let clock = 1.9e12;  // seconds pass between clicks, as they would by hand
+Date.now = () => clock;
 const rows = page.rows.map(r => {
   const box = el({ value: "18" }), hidden = el({ value: "18" });
-  const buy = el({ click() { pressed.push({ id: r.id, qty: box.value, hidden: hidden.value }); } });
+  // Like Torn: Buy swaps the row's amount box and button for its question.
+  let asking = false;
+  const yes = el({ textContent: page.yesLabel || "Yes", click() { pressed.push({ confirm: r.id }); } });
+  const no = el({ textContent: "No" });
+  const buy = el({ click() { pressed.push({ id: r.id, qty: box.value, hidden: hidden.value }); if (page.inRowConfirm) asking = true; } });
   const label = el({ textContent: "stock" });
   label.parentElement = { textContent: "stock" + r.stock };
   const row = el({
@@ -44,13 +50,14 @@ const rows = page.rows.map(r => {
       if (sel === "img") return el({ attrs: { src: "/images/items/" + r.id + "/medium.png" } });
       if (/itemNameButton/.test(sel)) return el({ textContent: r.name });
       if (/displayPrice/.test(sel)) return el({ textContent: "$" + r.cost.toLocaleString("en-US") });
-      if (/type=hidden\]$/.test(sel)) return hidden;
-      if (/input-money/.test(sel)) return box;
+      if (/type=hidden\]$/.test(sel)) return asking ? null : hidden;
+      if (/input-money/.test(sel)) return asking ? null : box;
       if (/buyButton/.test(sel)) return buy;
       return null;
     },
-    querySelectorAll: sel => (/srOnly/.test(sel) ? [label] : []),
+    querySelectorAll: sel => (/srOnly/.test(sel) ? [label] : sel === "button" ? (asking ? [yes, no] : [buy]) : []),
   });
+  Object.defineProperty(row, "textContent", { get: () => (asking ? "Are you sure you want to buy " + r.name + "?" : r.name) });
   buy.closest = s => (/row___/.test(s) ? row : null);
   row.buy = buy;
   return row;
@@ -79,7 +86,13 @@ eval(fs.readFileSync(process.argv[2], "utf8"));
 const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
 const btn = made.find(e => e.id === "th-abroad-btn");
 const out = { button: btn.textContent, panel: made.map(text).join("\n") };
-if (page.click) { btn.onclick(); out.pressed = pressed; }
+if (page.click) {
+  out.buttons = [];
+  for (let i = 0; i < (page.clicks || 1); i++) {
+    btn.onclick(); clock += 3000; ticks.forEach(f => f()); out.buttons.push(btn.textContent);
+  }
+  out.pressed = pressed;
+}
 if (page.handBuy != null) { onClick({ target: { closest: () => rows[page.handBuy].buy } }); }
 if (page.landed != null) {
   // Torn's bag count goes up once the buy goes through.
@@ -143,6 +156,18 @@ class AbroadJsTest(unittest.TestCase):
     def test_nothing_logged_until_the_bag_changes(self):
         out = self.run_page(click=True, landed=0)
         self.assertEqual(out["posts"], [])
+
+    def test_stays_on_the_item_while_torn_asks_and_confirms_it(self):
+        # Torn swaps the Plushie row for "are you sure": the button must not
+        # jump to the next item (which cancels the question), but confirm it.
+        out = self.run_page(bought=11, click=True, clicks=2, inRowConfirm=True)
+        self.assertTrue(out["buttons"][0].startswith("Confirm: buy 7 × Wolverine Plushie"), out["buttons"])
+        self.assertEqual(out["pressed"], [{"id": 261, "qty": "7", "hidden": "7"}, {"confirm": 261}])
+
+    def test_an_unknown_confirm_label_waits_instead_of_switching_items(self):
+        out = self.run_page(click=True, clicks=3, inRowConfirm=True, yesLabel="Proceed")
+        self.assertEqual(out["buttons"][-1], "Confirm 18 × Wolverine Plushie on Torn's page")
+        self.assertEqual(out["pressed"], [{"id": 261, "qty": "18", "hidden": "18"}])
 
     def test_wallet_limits_the_amount(self):
         rows = [{"id": 206, "name": "Xanax", "cost": 775_563, "stock": 40}]

@@ -1358,6 +1358,30 @@ TEMPLATE = """\
         return null;
     }
 
+    // After Buy, Torn's newer pages swap the row's controls for an inline
+    // "are you sure": the confirm, page-wide or inside that row (not the
+    // original Buy).
+    function rowConfirm(row, buy) {
+        var c = findConfirm();
+        if (c || !row) {
+            return c;
+        }
+        var buttons = Array.prototype.filter.call(row.querySelectorAll("button"), function (b) {
+            return b !== buy && b.offsetParent !== null;
+        });
+        var label = function (b) { return (b.textContent || "").trim(); };
+        return buttons.filter(function (b) { return /^(yes|confirm)/i.test(label(b)); })[0] ||
+            (/are you sure|confirm/i.test(row.textContent || "") ?
+                buttons.filter(function (b) { return /^buy/i.test(label(b)); })[0] : null) || null;
+    }
+
+    function logConfirmMiss(what, row) {
+        console.log("[TornHoarder] " + what + " confirm not recognized. Row: " + ((row && row.textContent) || "").trim() +
+            " · buttons on the page: " + Array.prototype.map.call(document.querySelectorAll("button"), function (b) {
+                return (b.textContent || "").trim();
+            }).join(" | "));
+    }
+
     // Torn's money boxes: a visible formatted field plus a hidden twin.
     function setMoney(visible, hidden, n) {
         visible.value = String(n);
@@ -1966,6 +1990,7 @@ TEMPLATE = """\
                     continue;
                 }
                 out.push({
+                    el: r,
                     input: input,
                     hidden: r.querySelector("input.input-money[type=hidden]"),
                     buy: r.querySelector("button[class*=buyButton]"),
@@ -1977,7 +2002,30 @@ TEMPLATE = """\
             return out.sort(function (x, y) { return x.price - y.price; });
         }
 
+        // While Torn asks about one seller's row, that row has no amount box,
+        // so it drops out of sellers(): stay on it (moving on cancels Torn's
+        // question) until Torn is done with it, or PENDING_MS passes.
+        var PENDING_MS = 20000;
+        var logged = false;
+
+        function settle() {
+            if (!pending) {
+                return;
+            }
+            var age = Date.now() - pending.at;
+            var row = pending.el;
+            var asking = row && !row.querySelector("input.input-money:not([type=hidden])") &&
+                Array.prototype.indexOf.call(document.querySelectorAll("ul[class*=sellerList] li[class*=rowWrapper]"), row) >= 0;
+            if (age > PENDING_MS) {
+                pending = null;
+                note = "Torn didn't take it; check the page and try again";
+            } else if (age > 1500 && !asking && !/are you sure/i.test(document.body.textContent || "")) {
+                pending = null;
+            }
+        }
+
         function render() {
+            settle();
             var left = Math.max(need - bought(), 0);
             var all = sellers();
             var next = all.filter(function (s) { return s.avail > 0 && s.price <= cap; })[0];
@@ -1990,8 +2038,14 @@ TEMPLATE = """\
                 btn.textContent = doneLabel("Restocked ✓");
             } else if (Date.now() < busyUntil) {
                 btn.textContent = "Buying…";
-            } else if (pending && findConfirm()) {
+            } else if (pending && rowConfirm(pending.el, pending.buy)) {
                 btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.name + " @ " + fmtMoney(pending.price);
+            } else if (pending) {
+                btn.textContent = "Confirm " + pending.qty + " × " + pending.name + " on Torn's page";
+                if (!logged) {
+                    logged = true;
+                    logConfirmMiss("restock", pending.el);
+                }
             } else if (next) {
                 btn.textContent = "Buy " + Math.min(next.avail, left) + " × " + next.name + " @ " + fmtMoney(next.price) + " (cheapest)";
             } else if (all.length) {
@@ -2014,11 +2068,14 @@ TEMPLATE = """\
                 finishStop(dock);
                 return;
             }
-            var c = findConfirm();
-            if (c && pending) {
-                pending = null;
-                busyUntil = Date.now() + 2000;
-                c.click();
+            settle();
+            if (pending) {
+                var c = rowConfirm(pending.el, pending.buy);
+                if (c) {
+                    pending = null;
+                    busyUntil = Date.now() + 2000;
+                    c.click();
+                }
                 render();
                 return;
             }
@@ -2035,11 +2092,12 @@ TEMPLATE = """\
             if (next.hidden) {
                 next.hidden.value = String(qty);
             }
-            pending = { qty: qty, name: next.name, price: next.price };
+            pending = { qty: qty, name: next.name, price: next.price, el: next.el, buy: next.buy, at: Date.now() };
             busyUntil = Date.now() + 500;
             setTimeout(function () {
                 var row = sellers().filter(function (s) { return s.price === next.price && s.avail === next.avail; })[0];
                 if (row && usable(row.buy)) {
+                    pending.buy = row.buy;
                     row.buy.click();
                 } else {
                     note = "amount filled, press BUY yourself";
@@ -2505,18 +2563,7 @@ TEMPLATE = """\
         var logged = false;
 
         function pendingConfirm() {
-            var c = findConfirm();
-            if (c || !pending) {
-                return c;
-            }
-            var row = pending.row.el;
-            var buttons = Array.prototype.filter.call(row.querySelectorAll("button"), function (b) {
-                return b !== pending.row.buy && b.offsetParent !== null;
-            });
-            var label = function (b) { return (b.textContent || "").trim(); };
-            return buttons.filter(function (b) { return /^(yes|confirm)/i.test(label(b)); })[0] ||
-                (/are you sure|confirm/i.test(row.textContent || "") ?
-                    buttons.filter(function (b) { return /^buy/i.test(label(b)); })[0] : null) || null;
+            return pending ? rowConfirm(pending.row.el, pending.row.buy) : findConfirm();
         }
 
         function logConfirm() {
@@ -2524,10 +2571,7 @@ TEMPLATE = """\
                 return;
             }
             logged = true;
-            console.log("[TornHoarder] abroad confirm not recognized. Row: " + (pending.row.el.textContent || "").trim() +
-                " · buttons on the page: " + Array.prototype.map.call(document.querySelectorAll("button"), function (b) {
-                    return (b.textContent || "").trim();
-                }).join(" | "));
+            logConfirmMiss("abroad", pending.row.el);
         }
 
         // A buy counts once the bag count goes up, not when Buy is pressed:

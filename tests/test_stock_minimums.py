@@ -124,15 +124,24 @@ global.location = Object.assign({ pathname: "/", search: "", hash: "", href: "" 
 global.Event = function () {};
 global.HTMLInputElement = { prototype: {} };
 Object.defineProperty(HTMLInputElement.prototype, "value", { set(v) { this._v = v; }, configurable: true });
-const sellers = (page.sellers || []).map(s => {
+const pressed = [];
+const sellers = (page.sellers || []).map((s, i) => {
   const input = el({ attrs: { "aria-label": s.name + " amount" } });
-  return el({ querySelector(sel) {
+  // page.inRowConfirm: like Torn's market, Buy swaps the row's amount box
+  // and button for "are you sure" with its own confirm button.
+  let asking = false;
+  const buy = el({ className: "buyButton___x", click() { pressed.push("buy:" + i); if (page.inRowConfirm) asking = true; } });
+  const yes = el({ textContent: page.yesLabel || "Yes", click() { pressed.push("confirm:" + i); asking = false; } });
+  const row = el({ querySelector(sel) {
     if (/hidden\]$/.test(sel)) return null;
-    if (/input/.test(sel)) return input;
+    if (/input/.test(sel)) return asking ? null : input;
     if (/price/.test(sel)) return el({ textContent: s.price });
     if (/available/.test(sel)) return el({ textContent: s.avail });
+    if (/buyButton/.test(sel)) return asking ? null : buy;
     return null;
-  } });
+  }, querySelectorAll: sel => (sel === "button" ? (asking ? [yes] : [buy]) : []) });
+  Object.defineProperty(row, "textContent", { get: () => (asking ? "Are you sure you want to buy " + s.name + "?" : s.name) });
+  return row;
 });
 global.document = {
   createElement: () => el(), body: el({ dataset: {} }), documentElement: { scrollHeight: 0 },
@@ -140,8 +149,11 @@ global.document = {
   querySelectorAll: s => (/sellerList/.test(s) ? sellers : []),
   createTextNode: t => ({ textContent: t, kids: [] }),
 };
-global.setInterval = () => 0;
-global.setTimeout = () => 0;
+let clock = 1.9e12;
+Date.now = () => clock;
+const ticks = [];
+global.setInterval = f => { ticks.push(f); return 0; };
+global.setTimeout = f => { if (page.runTimers) f(); return 0; };
 global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
@@ -150,7 +162,13 @@ const out = { badgeShown: badge.style.display, badge: text(badge) };
 if (page.openBadge) { badge.onclick({ target: {} }); out.badgeOpen = text(badge); }
 const btn = made.find(e => e.id === "th-restock-btn");
 if (btn) out.button = btn.textContent;
-if (btn && page.click) { btn.onclick(); out.went = location.href; out.run = store["tornhoarder.restockRun"] || null; }
+if (btn && page.click) {
+  out.buttons = [];
+  for (let i = 0; i < (page.clicks || 1); i++) {
+    btn.onclick(); clock += page.gap || 3000; ticks.forEach(f => f()); out.buttons.push(btn.textContent);
+  }
+  out.went = location.href; out.run = store["tornhoarder.restockRun"] || null; out.pressed = pressed;
+}
 out.store = store;
 process.stdout.write(JSON.stringify(out));
 """
@@ -203,6 +221,26 @@ class NoBuyLoopJsTest(StockJsTest):
         # Reloaded (or reopened from the badge): nothing more to buy.
         again = self.run_page(dict(self.PAGE, store=out["store"]))
         self.assertEqual(again["button"], "Restocked ✓ (click to close)")
+
+    def test_stays_on_the_seller_while_torn_asks_and_confirms_it(self):
+        # Live: Torn's question replaced the row, so the button jumped to the
+        # next seller (cancelling it) and counted each press as bought.
+        page = dict(self.PAGE, click=True, clicks=2, runTimers=True, inRowConfirm=True, store={},
+                    sellers=[{"name": "Ipecac Syrup", "price": "$10,000", "avail": "5 available"},
+                             {"name": "Ipecac Syrup", "price": "$11,000", "avail": "40 available"}])
+        out = self.run_page(page)
+        self.assertEqual(out["buttons"][0], "Confirm: buy 5 × Ipecac Syrup @ $10,000")
+        self.assertEqual(out["pressed"], ["buy:0", "confirm:0"])
+        log = json.loads(out["store"]["tornhoarder.bought"])
+        self.assertEqual([q for _, q in log["67"]], [5])
+
+    def test_an_unknown_confirm_label_waits_instead_of_switching_sellers(self):
+        page = dict(self.PAGE, click=True, clicks=3, runTimers=True, inRowConfirm=True, yesLabel="Proceed", store={},
+                    sellers=[{"name": "Ipecac Syrup", "price": "$10,000", "avail": "5 available"},
+                             {"name": "Ipecac Syrup", "price": "$11,000", "avail": "40 available"}])
+        out = self.run_page(page)
+        self.assertEqual(out["buttons"][-1], "Confirm 5 × Ipecac Syrup on Torn's page")
+        self.assertEqual(out["pressed"], ["buy:0"])
 
     def test_purchases_before_the_check_dont_count(self):
         old = {"tornhoarder.bought": json.dumps({"67": [[1_000_000, 12]]})}  # 1970: before the 1700s check

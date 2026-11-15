@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import time
 from typing import Dict, Optional
 
@@ -19,6 +21,7 @@ TEMPLATE = """\
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // ==/UserScript==
+// TornHoarder template __TEMPLATE__
 
 (function () {
     "use strict";
@@ -2820,6 +2823,17 @@ TEMPLATE = """\
 })();
 """
 
+# Which version of the code above a built script carries, so the app can
+# rebuild it after a code change without waiting for the next Run.
+TEMPLATE_HASH = hashlib.sha256(TEMPLATE.encode("utf-8")).hexdigest()[:12]
+
+
+def template_of(script: str) -> Optional[str]:
+    """The template stamp in a built script, or None (built before stamps)."""
+    m = re.search(r"^// TornHoarder template (\w+)$", script[:3000], re.M)
+    return m.group(1) if m else None
+
+
 DEFAULT_CFG: Dict[str, object] = {
     "priceBasis": "fair",
     "fillQty": True,
@@ -2850,4 +2864,5 @@ def build_userscript(
         .replace("__SHOP__", json.dumps(dict(shop_run or {"route": [], "items": {}}, built=int(time.time()))))
         .replace("__STOCK__", json.dumps(stock or {"checked": 0, "short": []}))
         .replace("__VERSION__", __version__)
+        .replace("__TEMPLATE__", TEMPLATE_HASH)
     )

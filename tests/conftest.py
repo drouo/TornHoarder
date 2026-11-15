@@ -69,6 +69,7 @@ def isolate_autofill_output(tmp_path, monkeypatch):
     from app.ui import autofill_export
 
     monkeypatch.setattr(autofill_export, "AUTOFILL_PATH", tmp_path / "tornhoarder.user.js")
+    monkeypatch.setattr(autofill_export, "USERSCRIPT_INPUTS_PATH", tmp_path / "userscript_inputs.json")
     monkeypatch.setattr(autofill_export, "_ensure_update_server", lambda *a, **k: (False, "http://test/"))
 
 

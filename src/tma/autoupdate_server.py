@@ -29,6 +29,18 @@ SCRIPT_NAME = "tornhoarder.user.js"
 MAX_REPORT_BYTES = 200_000
 
 
+def fetched_path(script_path: Path) -> Path:
+    return script_path.with_name(script_path.name + ".fetched")
+
+
+def last_fetched(script_path: Path) -> Optional[int]:
+    """When the script was last downloaded (installed or updated), or None."""
+    try:
+        return int(fetched_path(script_path).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
 def _make_handler(
     script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
     travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
@@ -61,6 +73,10 @@ def _make_handler(
                 self.send_error(404, "script not yet generated")
                 return
             content = script_path.read_bytes()
+            try:  # when Tampermonkey last took the script: newer builds are waiting to be installed
+                fetched_path(script_path).write_text(str(int(time.time())), encoding="utf-8")
+            except OSError:
+                pass
             self.send_response(200)
             # text/plain, not application/javascript: Tampermonkey's install-
             # detection only reliably intercepts .user.js navigations served

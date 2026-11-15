@@ -22,3 +22,4 @@ TRAVEL_PRICES_PATH = DATA_DIR / "travel_prices.json"
 SHOP_PLAN_PATH = DATA_DIR / "shop_plan.json"
 TRIP_BUYS_PATH = DATA_DIR / "trip_buys.csv"
 LAST_RUN_PATH = DATA_DIR / "last_run.json"
+USERSCRIPT_INPUTS_PATH = DATA_DIR / "userscript_inputs.json"  # what the last Run built the script from

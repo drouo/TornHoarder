@@ -47,3 +47,5 @@ data/travel_prices.json
 data/shop_plan.json
 data/trip_buys.csv
 data/last_run.json
+data/userscript_inputs.json
+data/tornhoarder.user.js.fetched

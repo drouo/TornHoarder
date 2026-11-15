@@ -6,16 +6,17 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 from tma.autoupdate_server import DEFAULT_PORT, build_server
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
-from tma.userscript import build_userscript
+from tma.userscript import TEMPLATE_HASH, build_userscript, template_of
 
 from ..paths import (AUTOFILL_PATH, FOREIGN_STOCK_PATH, SHOP_BUYS_PATH, SHOP_PLAN_PATH, STOCK_STATUS_PATH,
-                     TRAVEL_PRICES_PATH, TRIP_BUYS_PATH)
+                     TRAVEL_PRICES_PATH, TRIP_BUYS_PATH, USERSCRIPT_INPUTS_PATH)
 from .stock_minimums import status_json
 
 
@@ -37,6 +38,43 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
         return True, url
     threading.Thread(target=server.serve_forever, daemon=True, name="tma-autoupdate-server").start()
     return True, url
+
+
+def write_userscript(price_map: dict, base_stats: dict, cfg: dict, shop_run) -> tuple[str, Optional[str]]:
+    """Builds and writes the script, and saves what it was built from, so a
+    code update can rebuild it (refresh_userscript) without waiting for the
+    next Run. Returns (script, error writing it or None)."""
+    userjs = build_userscript(price_map, base_stats, cfg=cfg, shop_run=shop_run, stock=json.loads(status_json()))
+    try:
+        AUTOFILL_PATH.write_text(userjs, encoding="utf-8")
+    except OSError as exc:
+        return userjs, str(exc)
+    try:
+        USERSCRIPT_INPUTS_PATH.write_text(json.dumps({
+            "price_map": {str(k): v for k, v in price_map.items()},
+            "base_stats": {str(k): v for k, v in base_stats.items()}, "cfg": cfg, "shop_run": shop_run,
+        }), encoding="utf-8")
+    except OSError:
+        pass
+    return userjs, None
+
+
+def refresh_userscript() -> str:
+    """Rebuilds the served script when it was built from older code.
+    Returns "rebuilt", "current", "needs-run" (stale, but no saved inputs:
+    built before this existed) or "none" (never built)."""
+    try:
+        built = AUTOFILL_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return "none"
+    if template_of(built) == TEMPLATE_HASH:
+        return "current"
+    try:
+        inputs = json.loads(USERSCRIPT_INPUTS_PATH.read_text(encoding="utf-8"))
+        _, error = write_userscript(inputs["price_map"], inputs["base_stats"], inputs["cfg"], inputs["shop_run"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "needs-run"
+    return "needs-run" if error else "rebuilt"
 
 
 def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
@@ -77,20 +115,16 @@ def render_autofill_export(an: dict, ctx: dict, plan_ctx: dict) -> None:
         lu.update(item_plans.get(int(iid)) or {})
         price_map[int(iid)] = lu
 
-    userjs = build_userscript(
+    userjs, error = write_userscript(
         price_map,
         base_stats_map(profiles),
-        cfg={"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality,
-             "keepCash": rules.keep_cash, "ipecacOver": rules.ipecac_over},
-        shop_run=plan_ctx.get("shop_run"),
-        stock=json.loads(status_json()),
+        {"dumpUndercutPct": rules.dump_undercut_pct, "topMinQuality": rules.top_min_quality,
+         "keepCash": rules.keep_cash, "ipecacOver": rules.ipecac_over},
+        plan_ctx.get("shop_run"),
     )
-    write_ok = True
-    try:
-        AUTOFILL_PATH.write_text(userjs, encoding="utf-8")
-    except OSError as exc:
-        write_ok = False
-        st.caption(f"Could not write update copy: {exc}")
+    write_ok = error is None
+    if error:
+        st.caption(f"Could not write update copy: {error}")
 
     if write_ok:
         server_ok, update_url = _ensure_update_server()

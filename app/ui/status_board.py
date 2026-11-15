@@ -10,6 +10,7 @@ import streamlit as st
 
 from tma import __version__
 from tma.app_status import ICON, NEVER, STALE, jobs, script_version
+from tma.autoupdate_server import last_fetched
 from tma.config import clear_api_key, load_api_key, load_minimums, save_api_key
 
 from .. import paths
@@ -48,6 +49,9 @@ def render_sidebar() -> tuple[str, bool, bool]:
             st.warning("Enter your API key: every tool needs it.")
 
         st.subheader("Torn script")
+        # A code update rebuilds the script here, with the last Run's prices
+        # and plans, so fixes don't wait for the next Run.
+        state = autofill_export.refresh_userscript()
         built = script_version(autofill_export.AUTOFILL_PATH)
         server_ok, url = autofill_export._ensure_update_server()
         if not built:
@@ -56,6 +60,13 @@ def render_sidebar() -> tuple[str, bool, bool]:
             st.warning("The local script server couldn't start; download the script from Sell → Autofill script.")
         else:
             st.markdown(f"[**Install / update v{built} in Tampermonkey**]({url})")
+            fetched = last_fetched(autofill_export.AUTOFILL_PATH)
+            if state == "needs-run":
+                st.warning("The script was built by older code. **Run** once to rebuild it; after that, code "
+                           "updates rebuild it automatically.")
+            elif fetched is None or autofill_export.AUTOFILL_PATH.stat().st_mtime > fetched + 1:
+                st.warning("**New script ready:** click Install / update above"
+                           + (" (rebuilt with the latest fixes)." if state == "rebuilt" else "."))
             if built != __version__:
                 st.warning(f"Built as v{built}; this app is v{__version__}. **Run** to rebuild it, then update.")
             st.caption("Tampermonkey shows an update prompt. The app's live data (prices, plans, stock) reaches "

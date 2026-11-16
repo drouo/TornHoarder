@@ -111,10 +111,11 @@ def render_shop_scan(api_key: str) -> None:
         if in_stock.empty:
             st.info("Every profitable item is sold out right now.")
         else:
-            total = in_stock["Profit"].sum()
+            # Profit and Cost are per item, for at most a day's 100: they don't
+            # add up across items, since the limit covers all shops together.
             st.markdown(
-                f"**In stock and profitable** ({len(in_stock)}): about **{money(total)}** profit buying "
-                f"{money(in_stock['Cost'].sum())} worth".replace("$", "\\$")
+                f"**In stock and profitable** ({len(in_stock)}): profit and cost per item for up to {DAILY_CAP} "
+                f"bought (the daily limit, all shops together). Today's plan above picks the best {DAILY_CAP}."
             )
             st.dataframe(
                 in_stock, width="stretch", hide_index=True, column_config=cfg,

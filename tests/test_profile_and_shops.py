@@ -76,6 +76,12 @@ class ShopFlipsTest(unittest.TestCase):
         cag = df[df["Item"] == "Cagoutte"].iloc[0]
         self.assertEqual((cag["In stock"], cag["Worth buying"], cag["Profit"]), (0, 0, 0))
 
+    def test_profit_counts_at_most_a_days_100(self):
+        # 288 Roses in stock and 500 listed: Torn still allows only 100 a day.
+        market = {**MARKET, 1: {"item_id": 1, "price_1": 1450, "amount_1": 500}}
+        rose = scan_flips(SHOP_ITEMS, market).iloc[0]
+        self.assertEqual((rose["Worth buying"], rose["Profit"], rose["Cost"]), (100, round(1201.55 * 100), 17_500))
+
     def test_resale_is_capped_at_what_the_item_actually_sells_for(self):
         # Seen live: Parachutes listed from $480m, sell near $447.6m, cost $450m in Nikeh Sports.
         shop = [{"shop": "Nikeh Sports", "item_id": 106, "item_name": "Parachute", "price": 450e6, "stock": 509, "default_stock": 0}]

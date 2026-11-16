@@ -54,9 +54,10 @@ def scan_flips(
     above Torn's market value (what it has recently sold for): a listing can
     ask anything, e.g. Parachutes listed at $480m while they sell near $448m,
     under the $450m shop price. Cash is
-    no object, so the limit is how many will sell: "Worth buying" assumes you
-    can sell about as many as are listed now (capped by shop stock) without
-    sinking the price, and items are ranked by the profit on that many.
+    no object, so the limit is how many you may buy and will sell: "Worth
+    buying" assumes you can sell about as many as are listed now, capped by
+    shop stock and Torn's 100-a-day city-shop limit, and items are ranked by
+    the profit on that many.
     """
     rows = []
     for it in shop_items:
@@ -70,7 +71,7 @@ def scan_flips(
         if profit <= 0:
             continue
         listed = int(sum(l.get("amount") or 0 for l in listings))
-        units = min(it["stock"], listed)
+        units = min(it["stock"], listed, DAILY_CAP)
         rows.append({
             "Item": it["item_name"],
             "Shop": it["shop"],

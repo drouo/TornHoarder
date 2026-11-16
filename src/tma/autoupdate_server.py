@@ -19,6 +19,7 @@ import json
 import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qs, urlsplit
 
 from .foreign_stock import recent_restocks
 from .shops import record_shop_report
@@ -29,14 +30,17 @@ SCRIPT_NAME = "tornhoarder.user.js"
 MAX_REPORT_BYTES = 200_000
 
 
-def fetched_path(script_path: Path) -> Path:
-    return script_path.with_name(script_path.name + ".fetched")
+def running_path(script_path: Path) -> Path:
+    return script_path.with_name(script_path.name + ".running")
 
 
-def last_fetched(script_path: Path) -> Optional[int]:
-    """When the script was last downloaded (installed or updated), or None."""
+def last_running(script_path: Path) -> Optional[dict]:
+    """{"version", "seen"}: the build the script last reported from a Torn
+    page, or None. A download alone proves nothing (Tampermonkey's update
+    checks download it too); this is what's actually running."""
     try:
-        return int(fetched_path(script_path).read_text(encoding="utf-8").strip())
+        got = json.loads(running_path(script_path).read_text(encoding="utf-8"))
+        return got if isinstance(got, dict) and got.get("version") else None
     except (OSError, ValueError):
         return None
 
@@ -55,6 +59,18 @@ def _make_handler(
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
+            url = urlsplit(self.path)
+            if url.path == "/hello":  # each Torn page load: which build is running
+                version = (parse_qs(url.query).get("v") or [""])[0][:40]
+                if version:
+                    try:
+                        running_path(script_path).write_text(
+                            json.dumps({"version": version, "seen": int(time.time())}), encoding="utf-8")
+                    except OSError:
+                        pass
+                self.send_response(204)
+                self.end_headers()
+                return
             if self.path in feeds or self.path == "/restocks":
                 if self.path == "/restocks":  # restock alerts, from the foreign stock log
                     found = recent_restocks(foreign_path, time.time()) if foreign_path else []
@@ -73,10 +89,6 @@ def _make_handler(
                 self.send_error(404, "script not yet generated")
                 return
             content = script_path.read_bytes()
-            try:  # when Tampermonkey last took the script: newer builds are waiting to be installed
-                fetched_path(script_path).write_text(str(int(time.time())), encoding="utf-8")
-            except OSError:
-                pass
             self.send_response(200)
             # text/plain, not application/javascript: Tampermonkey's install-
             # detection only reliably intercepts .user.js navigations served

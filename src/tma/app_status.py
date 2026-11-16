@@ -60,14 +60,42 @@ def _json(path: Path) -> dict:
         return {}
 
 
-def script_version(path: Path) -> Optional[str]:
+def script_build(path: Path) -> Optional[str]:
+    """The script's full @version: app version plus build time."""
     try:
         head = Path(path).read_text(encoding="utf-8")[:2000]
     except OSError:
         return None
     m = re.search(r"@version\s+(\S+)", head)
+    return m.group(1) if m else None
+
+
+def script_version(path: Path) -> Optional[str]:
     # The app version, without the build-time segment each build adds.
-    return ".".join(m.group(1).split(".")[:3]) if m else None
+    build = script_build(path)
+    return ".".join(build.split(".")[:3]) if build else None
+
+
+def built_at(build: Optional[str]) -> Optional[str]:
+    """"14:03" (or "Nov 15 14:03" on another day) from a build's time segment."""
+    parts = (build or "").split(".")
+    if len(parts) < 4 or not parts[3].isdigit():
+        return None
+    t = time.localtime(int(parts[3]))
+    return time.strftime("%H:%M" if t[:3] == time.localtime()[:3] else "%b %d %H:%M", t)
+
+
+def script_running(built: str, running: Optional[dict], now: float) -> tuple[str, str]:
+    """(level, message) on whether Torn runs the newest build: "ok",
+    "old" (an update is waiting) or "unknown" (no Torn page seen yet)."""
+    if not running:
+        return "unknown", "Open or reload any Torn page to confirm the script is running."
+    seen = ago(running.get("seen"), now)
+    if running["version"] == built:
+        return "ok", f"✓ Torn is running the newest build (built {built_at(built)}), seen {seen}."
+    when = built_at(running["version"])
+    return "old", (f"Torn is still running {'the build from ' + when if when else 'an older build'} (seen {seen}). "
+                   f"Click **Install / update**, accept it in Tampermonkey, then reload a Torn page.")
 
 
 def last_csv_time(path: Path) -> Optional[int]:

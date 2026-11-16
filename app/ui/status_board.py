@@ -9,8 +9,8 @@ import time
 import streamlit as st
 
 from tma import __version__
-from tma.app_status import ICON, NEVER, STALE, jobs, script_version
-from tma.autoupdate_server import last_fetched
+from tma.app_status import ICON, NEVER, STALE, built_at, jobs, script_build, script_running, script_version
+from tma.autoupdate_server import last_running
 from tma.config import clear_api_key, load_api_key, load_minimums, save_api_key
 
 from .. import paths
@@ -59,14 +59,13 @@ def render_sidebar() -> tuple[str, bool, bool]:
         elif not server_ok:
             st.warning("The local script server couldn't start; download the script from Sell → Autofill script.")
         else:
-            st.markdown(f"[**Install / update v{built} in Tampermonkey**]({url})")
-            fetched = last_fetched(autofill_export.AUTOFILL_PATH)
+            build = script_build(autofill_export.AUTOFILL_PATH)
+            st.markdown(f"[**Install / update v{built} (built {built_at(build)}) in Tampermonkey**]({url})")
             if state == "needs-run":
                 st.warning("The script was built by older code. **Run** once to rebuild it; after that, code "
                            "updates rebuild it automatically.")
-            elif fetched is None or autofill_export.AUTOFILL_PATH.stat().st_mtime > fetched + 1:
-                st.warning("**New script ready:** click Install / update above"
-                           + (" (rebuilt with the latest fixes)." if state == "rebuilt" else "."))
+            else:
+                _script_running(build)
             if built != __version__:
                 st.warning(f"Built as v{built}; this app is v{__version__}. **Run** to rebuild it, then update.")
             st.caption("Tampermonkey shows an update prompt. The app's live data (prices, plans, stock) reaches "
@@ -76,6 +75,13 @@ def render_sidebar() -> tuple[str, bool, bool]:
         restart = st.button("↻ Restart", key="restart", help="Clears this session's results and plans; "
                             "saved data and settings stay.")
     return key, remember, restart
+
+
+@st.fragment(run_every=10)
+def _script_running(build: str) -> None:
+    """Re-checked every 10s, so an update shows as taken without touching the app."""
+    level, text = script_running(build, last_running(autofill_export.AUTOFILL_PATH), time.time())
+    {"ok": st.success, "old": st.warning, "unknown": st.info}[level](text)
 
 
 def board_jobs() -> list:

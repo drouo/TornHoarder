@@ -1,5 +1,5 @@
 """A code update rebuilds the served script from the last Run's inputs, and
-the server notes when Tampermonkey last took it, so fixes aren't missed."""
+the running script reports its build, so the app can say whether an update took."""
 
 import threading
 import urllib.request
@@ -7,7 +7,8 @@ import urllib.request
 import pytest
 
 from app.ui import autofill_export
-from tma.autoupdate_server import build_server, last_fetched
+from tma.app_status import script_running
+from tma.autoupdate_server import build_server, last_running
 from tma.userscript import TEMPLATE_HASH, template_of
 
 CFG = {"dumpUndercutPct": 1, "topMinQuality": 90, "keepCash": 0, "ipecacOver": 0}
@@ -37,15 +38,28 @@ def test_a_script_from_before_stamps_needs_one_run():
     assert autofill_export.refresh_userscript() == "none"
 
 
-def test_the_server_notes_when_the_script_is_downloaded(tmp_path):
+def test_the_server_notes_the_build_running_in_torn(tmp_path):
     script = tmp_path / "tornhoarder.user.js"
     script.write_text("// script", encoding="utf-8")
-    assert last_fetched(script) is None
     server = build_server(script, port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
-        url = f"http://127.0.0.1:{server.server_address[1]}/tornhoarder.user.js"
-        assert urllib.request.urlopen(url, timeout=5).read() == b"// script"
+        assert urllib.request.urlopen(base + "/tornhoarder.user.js", timeout=5).read() == b"// script"
+        assert last_running(script) is None  # a download (e.g. an update check) isn't a running script
+        assert urllib.request.urlopen(base + "/hello?v=1.5.1.1794852228", timeout=5).status == 204
     finally:
         server.shutdown()
-    assert last_fetched(script) == pytest.approx(script.stat().st_mtime, abs=120)
+    got = last_running(script)
+    assert got["version"] == "1.5.1.1794852228"
+    assert got["seen"] == pytest.approx(script.stat().st_mtime, abs=120)
+
+
+def test_the_sidebar_says_whether_the_newest_build_runs():
+    now = 1_794_900_000
+    assert script_running("1.5.1.1794852228", None, now)[0] == "unknown"
+    level, text = script_running("1.5.1.1794852228", {"version": "1.5.1.1794852228", "seen": now - 60}, now)
+    assert (level, text.startswith("✓ Torn is running the newest build")) == ("ok", True)
+    level, text = script_running("1.5.1.1794852228", {"version": "1.5.1.1794800000", "seen": now - 60}, now)
+    assert level == "old" and "Install / update" in text
+    assert "an older build" in script_running("1.5.1.1794852228", {"version": "1.5.1", "seen": now}, now)[1]

@@ -41,6 +41,10 @@ TEMPLATE = """\
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
         : "__VERSION__";
+    // Tells the app which build is running, so its sidebar can say whether an update took.
+    if (window.top === window.self && typeof GM_xmlhttpRequest !== "undefined") {
+        GM_xmlhttpRequest({ method: "GET", url: CFG.reportUrl.replace(/shop-report$/, "hello") + "?v=" + encodeURIComponent(VER) });
+    }
     var PLAN_BASIS = { dump: "fast", competitive: "fast", top: "greedy" };
     var NL = String.fromCharCode(10);
 

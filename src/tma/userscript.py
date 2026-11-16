@@ -2522,13 +2522,34 @@ TEMPLATE = """\
             })[0] || null;
         }
 
+        // Torn asks "Are you sure you want to travel back to Torn? ...": its
+        // confirm is the control inside that question, not any "Travel" link.
+        function homeQuestion(el) {
+            for (var up = 0; up < 6 && el; up++, el = el.parentElement) {
+                if (/are you sure/i.test(el.textContent || "")) {
+                    return el;
+                }
+            }
+            return null;
+        }
+
         function homeConfirm() {
             if (!homeAt || Date.now() - homeAt > PENDING_MS) {
                 return null;
             }
-            return visibleControls().filter(function (b) {
-                return /^(travel|yes|confirm|continue)$/i.test((b.textContent || "").trim());
-            })[0] || null;
+            var all = document.querySelectorAll("button, a, input[type=button], input[type=submit], [role=button]");
+            for (var i = 0; i < all.length; i++) {
+                var el = all[i];
+                var t = (el.textContent || el.value || "").trim();
+                if (el.offsetParent === null || el.closest("#th-dock") || t === homeClicked ||
+                    !/^(yes|confirm|continue|travel|fly|ok)\\b/i.test(t)) {
+                    continue;
+                }
+                if (homeQuestion(el)) {
+                    return el;
+                }
+            }
+            return null;
         }
 
         function logHome() {
@@ -2543,20 +2564,33 @@ TEMPLATE = """\
         // Clicked, but no question and no takeoff: the control wasn't the
         // right one (Torn's page abroad hasn't been seen live yet).
         var homeClicked = "";
+        var confirmAt = 0;
+        var confirmed = null;
         var homeFailLogged = false;
 
         function homeFailed() {
-            return homeAt && Date.now() - homeAt > 6000 && !homeConfirm() && document.body.dataset.traveling !== "true";
+            if (!homeAt || document.body.dataset.traveling === "true") {
+                return false;
+            }
+            return confirmAt ? Date.now() - confirmAt > 6000 : Date.now() - homeAt > 6000 && !homeConfirm();
         }
 
         function homeLabel(base) {
             if (homeFailed()) {
                 if (!homeFailLogged) {
                     homeFailLogged = true;
-                    console.log("[TornHoarder] abroad: clicked \\"" + homeClicked + "\\" but Torn didn't take off. Buttons and links: " +
+                    var q = confirmed && homeQuestion(confirmed);
+                    console.log("[TornHoarder] abroad: clicked \\"" + homeClicked + "\\"" +
+                        (confirmed ? " then confirmed with <" + confirmed.tagName + "> \\"" +
+                            (confirmed.textContent || confirmed.value || "").trim() + "\\"" : "") +
+                        " but Torn didn't take off." + (q ? " Question: " + (q.outerHTML || q.textContent || "").slice(0, 1500) : "") +
+                        " Buttons and links: " +
                         visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
                 }
                 return base + " · Torn didn't take off: fly home from Torn's page (click to close)";
+            }
+            if (confirmAt) {
+                return "Taking off…";
             }
             if (homeConfirm()) {
                 return "✈ Confirm: fly home";
@@ -2716,15 +2750,25 @@ TEMPLATE = """\
             }
             var n = next(rows());
             if (!n) {
-                var home = homeFailed() ? null : homeConfirm() || homeControl();
+                if (confirmAt && !homeFailed()) {
+                    render();  // confirmed: waiting for Torn to take off
+                    return;
+                }
+                var yes = homeFailed() ? null : homeConfirm();
+                var home = yes || (homeFailed() ? null : homeControl());
                 if (!home) {
                     dock.close();
                     return;
                 }
-                if (!homeAt || Date.now() - homeAt > PENDING_MS) {
-                    homeAt = Date.now();
+                if (yes) {
+                    confirmAt = Date.now();
+                    confirmed = yes;
+                } else {
+                    if (!homeAt || Date.now() - homeAt > PENDING_MS) {
+                        homeAt = Date.now();
+                    }
+                    homeClicked = (home.textContent || "").trim();
                 }
-                homeClicked = (home.textContent || "").trim();
                 busyUntil = Date.now() + 800;
                 home.click();
                 render();

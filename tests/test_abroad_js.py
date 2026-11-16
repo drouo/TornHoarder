@@ -76,15 +76,20 @@ let onClick = null;
 // Torn's own fly-home control (label unverified live) and its confirm.
 let homeAsking = false;
 const home = el({ textContent: page.homeLabel || "", click() { pressed.push("home"); if (page.homeAsks) homeAsking = true; } });
-const homeYes = el({ textContent: "Travel", click() { pressed.push("home-confirm"); } });
-const controls = () => (page.homeLabel ? [home].concat(homeAsking ? [homeYes] : []) : []);
+// Seen live: "Are you sure you want to travel back to Torn? It will take around 27 minutes ..."
+const homeYes = el({ textContent: "Yes", click() { pressed.push("home-confirm"); } });
+homeYes.parentElement = { textContent: "Are you sure you want to travel back to Torn? It will take around 27 minutes to reach your destination.YesNo" };
+// A "Travel" link elsewhere on the page that isn't the confirm.
+const travelLink = el({ textContent: "Travel", click() { pressed.push("travel-link"); } });
+const controls = () => (page.homeLabel ? [home, travelLink].concat(homeAsking ? [homeYes] : []) : []);
 const confirmSel = s => /role=button/.test(s);
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
   body: el({ dataset: { abroad: "true", traveling: "false", country: "mexico" }, textContent: bag(page.bought) }),
   getElementById: () => null,
   querySelector: s => (s === "#user-money" ? el({ attrs: { "data-money": String(page.wallet) } }) : null),
-  querySelectorAll: s => (/row___/.test(s) ? rows : s === "button, a" ? controls() : confirmSel(s) ? pageYes : []),
+  querySelectorAll: s => (/row___/.test(s) ? rows : s === "button, a" ? controls()
+    : confirmSel(s) ? pageYes.concat(page.homeLabel ? controls() : []) : []),
   createTextNode: t => ({ textContent: t, kids: [] }),
   addEventListener(t, f) { if (t === "click") onClick = f; },
 };
@@ -212,6 +217,14 @@ class AbroadJsTest(unittest.TestCase):
         self.assertEqual(out["button"], "Bag full ✓ · ✈ Fly home")
         self.assertEqual(out["buttons"][0], "✈ Confirm: fly home")
         self.assertEqual(out["pressed"], ["home", "home-confirm"])
+
+    def test_a_confirm_that_doesnt_take_off_says_so(self):
+        out = self.run_page(bought=18, homeLabel="Travel back to Torn", homeAsks=True, click=True, clicks=4)
+        self.assertEqual(out["pressed"][:2], ["home", "home-confirm"])  # never the "Travel" link
+        self.assertNotIn("travel-link", out["pressed"])
+        self.assertEqual(out["buttons"][1], "Taking off…")
+        self.assertEqual(out["pressed"], ["home", "home-confirm"])  # waits, doesn't press again
+        self.assertIn("Torn didn't take off", out["buttons"][-1])
 
     def test_without_prices_it_says_to_plan_first(self):
         out = self.run_page(prices={"checked": 0, "sell": {}})

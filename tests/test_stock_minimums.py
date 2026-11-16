@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tma.autoupdate_server import build_server
 from tma.config import load_minimums, save_minimums
-from tma.stock_minimums import as_reserves, check_stock, load_status, restock_route, write_status
+from tma.inventory import InventoryEntry
+from tma.stock_minimums import as_reserves, check_stock, held_counts, load_status, restock_route, write_status
 from tma.userscript import build_userscript
 
 PROFILES = {
@@ -44,6 +45,13 @@ class CheckStockTest(unittest.TestCase):
         self.assertEqual((rows["item:68"]["need"], rows["item:68"]["url"]), (0, None))
         self.assertEqual(rows["item:68"]["source"], "Pharmacy")  # shop is cheaper for this one
         self.assertEqual(rows["item:1363"]["need"], 0)
+
+    def test_equipped_stacks_count_as_held(self):
+        # Seen live: 12 Smoke Grenades equipped in the Temporary slot read as 0.
+        entries = [InventoryEntry(item_id=226, name="Smoke Grenade", amount=12, equipped=True, uid=None),
+                   InventoryEntry(item_id=67, name="First Aid Kit", amount=3, equipped=False, uid=None),
+                   InventoryEntry(item_id=67, name="First Aid Kit", amount=2, equipped=False, uid=None)]
+        self.assertEqual(held_counts(entries), {226: 12, 67: 5})
 
     def test_ammo_follows_the_equipped_gun(self):
         rows = self.rows()

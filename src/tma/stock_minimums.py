@@ -35,6 +35,15 @@ def categories_for(minimums: dict[str, int], profiles: dict) -> tuple[str, ...]:
     return tuple(sorted(c for c in cats if c))
 
 
+def held_counts(entries) -> dict[int, int]:
+    """{item_id: quantity} from inventory entries, equipped ones included: a
+    stack of grenades in the Temporary slot is still stock on hand."""
+    held: dict[int, int] = {}
+    for e in entries:
+        held[e.item_id] = held.get(e.item_id, 0) + int(e.amount)
+    return held
+
+
 def check_stock(
     minimums: dict[str, int], held: dict[int, int], equipment: Optional[list], profiles: dict,
     now: Optional[float] = None,

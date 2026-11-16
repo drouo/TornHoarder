@@ -14,7 +14,7 @@ from tma.fmt import money
 from tma.http_client import session_for_requests, shared_bucket
 from tma.inventory import fetch_inventory
 from tma.item_stats import load_profiles
-from tma.stock_minimums import AMMO_SLOTS, RESTOCK_URL, categories_for, check_stock, restock_route, write_status
+from tma.stock_minimums import AMMO_SLOTS, RESTOCK_URL, categories_for, check_stock, held_counts, restock_route, write_status
 
 from .. import paths
 
@@ -23,14 +23,10 @@ AMMO_LABELS = {"ammo:primary": "Primary ammo (equipped gun, Standard)", "ammo:se
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _held(api_key: str, categories: tuple[str, ...]) -> tuple[dict[int, int], list[str]]:
-    """{item_id: quantity held, not equipped} across `categories`; re-read at most every 5 minutes."""
+    """{item_id: quantity held, equipped included} across `categories`; re-read at most every 5 minutes."""
     bucket = shared_bucket()
     inv = fetch_inventory(session_for_requests(), api_key, categories=categories, bucket_take=bucket.take)
-    held: dict[int, int] = {}
-    for e in inv.entries:
-        if not e.equipped:
-            held[e.item_id] = held.get(e.item_id, 0) + int(e.amount)
-    return held, inv.errors
+    return held_counts(inv.entries), inv.errors
 
 
 def check_keep_stocked(api_key: str, bundle_fn: Callable[[str], dict]) -> dict:

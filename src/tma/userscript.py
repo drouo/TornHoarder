@@ -41,6 +41,19 @@ TEMPLATE = """\
     var VER = (typeof GM_info !== "undefined" && GM_info.script)
         ? GM_info.script.version
         : "__VERSION__";
+    // Diagnostics go to the console and to the app (data/tornhoarder.log.jsonl),
+    // so a failure abroad can be read afterwards without the console.
+    function thLog(msg) {
+        console.log(msg);
+        if (typeof GM_xmlhttpRequest !== "undefined") {
+            GM_xmlhttpRequest({
+                method: "POST", url: CFG.reportUrl.replace(/shop-report$/, "script-log"),
+                headers: { "Content-Type": "application/json" },
+                data: JSON.stringify({ ver: VER, page: location.pathname + location.search, msg: msg })
+            });
+        }
+    }
+
     // Tells the app which build is running, so its sidebar can say whether an update took.
     if (window.top === window.self && typeof GM_xmlhttpRequest !== "undefined") {
         GM_xmlhttpRequest({ method: "GET", url: CFG.reportUrl.replace(/shop-report$/, "hello") + "?v=" + encodeURIComponent(VER) });
@@ -928,7 +941,7 @@ TEMPLATE = """\
         window.__TH_LIST__ = { planListing: planListing, plannedLines: plannedLines, rowInfo: rowInfo, scanVisible: scanVisible, expandPlannedGroups: expandPlannedGroups, selectLinks: selectLinks, copiesWarning: copiesWarning };
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] list mode v" + VER + ": " + plannedLines().length + " item(s) planned");
+        thLog("[TornHoarder] list mode v" + VER + ": " + plannedLines().length + " item(s) planned");
     }
 
     // ---- Shop run: one fixed button, one action per click -----------------
@@ -1294,7 +1307,7 @@ TEMPLATE = """\
                     rejects: rejects.map(Number)
                 })
             });
-            console.log("[TornHoarder] reported " + step + ": buys " + Object.keys(buys).length + ", refused " + rejects.length);
+            thLog("[TornHoarder] reported " + step + ": buys " + Object.keys(buys).length + ", refused " + rejects.length);
             return true;
         }
 
@@ -1306,7 +1319,7 @@ TEMPLATE = """\
             }
             render();
         }, 700);
-        console.log("[TornHoarder] shop run v" + VER + ": " + route.length + " shop(s) on route");
+        thLog("[TornHoarder] shop run v" + VER + ": " + route.length + " shop(s) on route");
     }
 
     // ---- Shared by the deposit, Ipecac and buy modes -----------------------
@@ -1387,7 +1400,7 @@ TEMPLATE = """\
     }
 
     function logConfirmMiss(what, row) {
-        console.log("[TornHoarder] " + what + " confirm not recognized. Row: " + ((row && row.textContent) || "").trim() +
+        thLog("[TornHoarder] " + what + " confirm not recognized. Row: " + ((row && row.textContent) || "").trim() +
             " · buttons on the page: " + Array.prototype.map.call(document.querySelectorAll("button"), function (b) {
                 return (b.textContent || "").trim();
             }).join(" | "));
@@ -1495,7 +1508,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] deposit mode v" + VER);
+        thLog("[TornHoarder] deposit mode v" + VER);
     }
 
     // ---- Items page: take the Ipecac Syrup you chose to take ---------------
@@ -1567,7 +1580,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] ipecac mode v" + VER);
+        thLog("[TornHoarder] ipecac mode v" + VER);
     }
 
     // ---- What the buy modes have bought, per item, for a day ---------------
@@ -1713,7 +1726,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] buy mode v" + VER + ": " + Object.keys(want).length + " item(s)");
+        thLog("[TornHoarder] buy mode v" + VER + ": " + Object.keys(want).length + " item(s)");
     }
 
     // ---- Keep stocked: restock run ------------------------------------------
@@ -2125,7 +2138,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] restock mode v" + VER);
+        thLog("[TornHoarder] restock mode v" + VER);
     }
 
     // ---- Big Al's ammo: buy Standard rounds up to a minimum ---------------
@@ -2202,7 +2215,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 1000);
-        console.log("[TornHoarder] ammo mode v" + VER);
+        thLog("[TornHoarder] ammo mode v" + VER);
     }
 
     // ---- Travel agency: fly where the app's planner says ------------------
@@ -2265,7 +2278,7 @@ TEMPLATE = """\
                 var c = confirmText();
                 if (!logged && !(c && c.country === country)) {
                     logged = true;
-                    console.log("[TornHoarder] fly: " + country + " not picked. Pin: " + !!pin() + " · dropdown: " +
+                    thLog("[TornHoarder] fly: " + country + " not picked. Pin: " + !!pin() + " · dropdown: " +
                         (d ? d.select.value + "→" + d.value : "none") + " · page says: " + (c ? c.country : "no confirm text"));
                 }
             }, 1500);
@@ -2315,7 +2328,7 @@ TEMPLATE = """\
 
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] fly mode v" + VER + ": " + country);
+        thLog("[TornHoarder] fly mode v" + VER + ": " + country);
     }
 
     // ---- Abroad: fill your bag with what pays best -------------------------
@@ -2557,7 +2570,7 @@ TEMPLATE = """\
                 return;
             }
             homeLogged = true;
-            console.log("[TornHoarder] abroad: no fly-home control recognized. Buttons and links: " +
+            thLog("[TornHoarder] abroad: no fly-home control recognized. Buttons and links: " +
                 visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
         }
 
@@ -2580,7 +2593,7 @@ TEMPLATE = """\
                 if (!homeFailLogged) {
                     homeFailLogged = true;
                     var q = confirmed && homeQuestion(confirmed);
-                    console.log("[TornHoarder] abroad: clicked \\"" + homeClicked + "\\"" +
+                    thLog("[TornHoarder] abroad: clicked \\"" + homeClicked + "\\"" +
                         (confirmed ? " then confirmed with <" + confirmed.tagName + "> \\"" +
                             (confirmed.textContent || confirmed.value || "").trim() + "\\"" : "") +
                         " but Torn didn't take off." + (q ? " Question: " + (q.outerHTML || q.textContent || "").slice(0, 1500) : "") +
@@ -2614,7 +2627,7 @@ TEMPLATE = """\
             if (!whyLogged) {
                 whyLogged = true;
                 var m = /purchased[^.]{0,40}/i.exec(document.body.textContent || "");
-                console.log("[TornHoarder] abroad: nothing to buy (" + why + "). Bag text: " + (m ? m[0] : "not found") +
+                thLog("[TornHoarder] abroad: nothing to buy (" + why + "). Bag text: " + (m ? m[0] : "not found") +
                     " · wallet: " + wallet + " · rows: " + all.map(function (r) {
                         return r.name + " stock " + r.stock + " cost " + r.cost + " profit " + r.profit;
                     }).join("; "));
@@ -2628,6 +2641,8 @@ TEMPLATE = """\
         // looks for the confirm button, page-wide or inside the row.
         var PENDING_MS = 20000;
         var logged = false;
+
+        var pressed = null;  // the confirm pressed for the pending buy
 
         function pendingConfirm() {
             return pending ? rowConfirm(pending.row.el, pending.row.buy) : findConfirm();
@@ -2709,7 +2724,12 @@ TEMPLATE = """\
             }
             setLines(panel, lines.concat(bought));
             if (pending && Date.now() - buyAt > PENDING_MS) {
+                thLog("[TornHoarder] abroad: buy of " + pending.qty + " x " + pending.row.name + " not taken. " +
+                    (pressed ? "Pressed <" + pressed.tagName + "> " + (pressed.outerHTML || "").slice(0, 600) +
+                        " · in: " + ((pressed.parentElement && pressed.parentElement.outerHTML) || "").slice(0, 1500)
+                        : "No confirm found.") + " · row: " + ((pending.row.el && pending.row.el.outerHTML) || "").slice(0, 1500));
                 pending = null;
+                pressed = null;
                 note = "Torn didn't take it; check the page and try again";
             }
             var c = pendingConfirm();
@@ -2743,6 +2763,7 @@ TEMPLATE = """\
                 var c = pendingConfirm();
                 if (c) {
                     busyUntil = Date.now() + 2000;
+                    pressed = c;
                     c.click();
                 }
                 render();
@@ -2802,7 +2823,7 @@ TEMPLATE = """\
         }
         render();
         setInterval(render, 700);
-        console.log("[TornHoarder] abroad mode v" + VER);
+        thLog("[TornHoarder] abroad mode v" + VER);
     }
 
     if (window.top !== window) {
@@ -2835,7 +2856,7 @@ TEMPLATE = """\
     if (/[?&]threstock=1/.test(location.search)) {
         var begin = function (status) {
             if (!startRestock((status && status.route) || [])) {
-                console.log("[TornHoarder] restock: nothing to buy");
+                thLog("[TornHoarder] restock: nothing to buy");
             }
         };
         if (typeof GM_xmlhttpRequest !== "undefined") {

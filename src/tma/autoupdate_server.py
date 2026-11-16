@@ -45,6 +45,24 @@ def last_running(script_path: Path) -> Optional[dict]:
         return None
 
 
+def log_path(script_path: Path) -> Path:
+    """The script's diagnostics ("[TornHoarder] ..." lines), one JSON per line."""
+    return script_path.with_name("tornhoarder.log.jsonl")
+
+
+MAX_LOG_BYTES = 2_000_000
+
+
+def _append_log(script_path: Path, entry: dict) -> None:
+    path = log_path(script_path)
+    line = json.dumps({"ts": int(time.time()), **{k: str(entry.get(k, ""))[:4000] for k in ("ver", "page", "msg")}})
+    if path.exists() and path.stat().st_size > MAX_LOG_BYTES:  # keep the newer half
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text[len(text) // 2:].split("\n", 1)[-1], encoding="utf-8")
+    with path.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
 def _make_handler(
     script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
     travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
@@ -103,8 +121,9 @@ def _make_handler(
             self.wfile.write(content)
 
         def do_POST(self) -> None:  # noqa: N802 (stdlib method name)
-            # /shop-report: a city shop's Sell page; /trip-buy: a buy abroad.
-            sinks = {"/shop-report": (reports_path, record_shop_report), "/trip-buy": (trips_path, record_buy)}
+            # /shop-report: a city shop's Sell page; /trip-buy: a buy abroad; /script-log: diagnostics.
+            sinks = {"/shop-report": (reports_path, record_shop_report), "/trip-buy": (trips_path, record_buy),
+                     "/script-log": (script_path, _append_log)}
             path, record = sinks.get(self.path, (None, None))
             if path is None:
                 self.send_error(404)

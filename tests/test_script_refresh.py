@@ -1,6 +1,7 @@
 """A code update rebuilds the served script from the last Run's inputs, and
 the running script reports its build, so the app can say whether an update took."""
 
+import json
 import threading
 import urllib.request
 
@@ -8,7 +9,7 @@ import pytest
 
 from app.ui import autofill_export
 from tma.app_status import script_running
-from tma.autoupdate_server import build_server, last_running
+from tma.autoupdate_server import build_server, last_running, log_path
 from tma.userscript import TEMPLATE_HASH, template_of
 
 CFG = {"dumpUndercutPct": 1, "topMinQuality": 90, "keepCash": 0, "ipecacOver": 0}
@@ -48,8 +49,13 @@ def test_the_server_notes_the_build_running_in_torn(tmp_path):
         assert urllib.request.urlopen(base + "/tornhoarder.user.js", timeout=5).read() == b"// script"
         assert last_running(script) is None  # a download (e.g. an update check) isn't a running script
         assert urllib.request.urlopen(base + "/hello?v=1.5.1.1794852228", timeout=5).status == 204
+        req = urllib.request.Request(base + "/script-log", method="POST", headers={"Content-Type": "application/json"},
+                                     data=b'{"ver": "1.5.1.1", "page": "/page.php?sid=travel", "msg": "[TornHoarder] abroad: x"}')
+        assert urllib.request.urlopen(req, timeout=5).status == 204
     finally:
         server.shutdown()
+    logged = log_path(script).read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["msg"] for line in logged] == ["[TornHoarder] abroad: x"]
     got = last_running(script)
     assert got["version"] == "1.5.1.1794852228"
     assert got["seen"] == pytest.approx(script.stat().st_mtime, abs=120)

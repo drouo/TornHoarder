@@ -95,7 +95,7 @@ global.document = {
 };
 const posts = [];
 global.GM_xmlhttpRequest = o => {
-  if (o.method === "POST") { posts.push({ url: o.url, data: JSON.parse(o.data) }); return; }
+  if (o.method === "POST") { if (!/script-log$/.test(o.url)) posts.push({ url: o.url, data: JSON.parse(o.data) }); return; }
   o.onload({ responseText: JSON.stringify(/travel-prices$/.test(o.url) ? page.prices : {}) });
 };
 const ticks = [];

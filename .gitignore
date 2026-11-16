@@ -49,3 +49,4 @@ data/trip_buys.csv
 data/last_run.json
 data/userscript_inputs.json
 data/tornhoarder.user.js.running
+data/tornhoarder.log.jsonl

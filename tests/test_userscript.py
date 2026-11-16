@@ -1,3 +1,4 @@
+import re
 import sys
 import json
 import unittest
@@ -65,8 +66,10 @@ class UserscriptTest(unittest.TestCase):
         from tma import __version__
 
         out = build_userscript({}, {})
-        self.assertIn("// @version      " + __version__ + "\n", out)
+        # Plus the build time, so Tampermonkey treats each rebuild as an update.
+        self.assertRegex(out, r"// @version      " + re.escape(__version__) + r"\.\d{10}\n")
         self.assertNotIn("__VERSION__", out)
+        self.assertNotIn("__BUILD__", out)
 
 
 if __name__ == "__main__":

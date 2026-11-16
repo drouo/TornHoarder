@@ -66,7 +66,8 @@ def script_version(path: Path) -> Optional[str]:
     except OSError:
         return None
     m = re.search(r"@version\s+(\S+)", head)
-    return m.group(1) if m else None
+    # The app version, without the build-time segment each build adds.
+    return ".".join(m.group(1).split(".")[:3]) if m else None
 
 
 def last_csv_time(path: Path) -> Optional[int]:

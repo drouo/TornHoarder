@@ -12,7 +12,7 @@ TEMPLATE = """\
 // ==UserScript==
 // @name         TornHoarder
 // @namespace    tornhoarder
-// @version      __VERSION__
+// @version      __VERSION__.__BUILD__
 // @description  TornHoarder: fills Add Listing prices from your sell plan and runs one-button city shop sales.
 // @match        https://www.torn.com/*
 // @updateURL    http://127.0.0.1:9999/tornhoarder.user.js
@@ -2869,5 +2869,8 @@ def build_userscript(
         .replace("__SHOP__", json.dumps(dict(shop_run or {"route": [], "items": {}}, built=int(time.time()))))
         .replace("__STOCK__", json.dumps(stock or {"checked": 0, "short": []}))
         .replace("__VERSION__", __version__)
+        # Each build gets its own version (app version + build time), so
+        # Tampermonkey sees every rebuild as an update instead of a reinstall.
+        .replace("__BUILD__", str(int(time.time())))
         .replace("__TEMPLATE__", TEMPLATE_HASH)
     )

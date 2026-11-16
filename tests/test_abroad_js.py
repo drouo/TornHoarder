@@ -36,13 +36,22 @@ global.HTMLInputElement = { prototype: {} };
 const pressed = [];
 let clock = 1.9e12;  // seconds pass between clicks, as they would by hand
 Date.now = () => clock;
+// page.pageConfirm: Torn's live question abroad, "Buy N x Item for $X?",
+// with Yes / No rendered outside the row's own buttons.
+const pageYes = [];
 const rows = page.rows.map(r => {
   const box = el({ value: "18" }), hidden = el({ value: "18" });
   // Like Torn: Buy swaps the row's amount box and button for its question.
   let asking = false;
   const yes = el({ textContent: page.yesLabel || "Yes", click() { pressed.push({ confirm: r.id }); } });
+  const question = () => "Buy " + box.value + " x " + r.name + " for $" + (Number(box.value) * r.cost).toLocaleString("en-US") + "?";
+  yes.parentElement = { get textContent() { return question() + "YesNo"; } };
   const no = el({ textContent: "No" });
-  const buy = el({ click() { pressed.push({ id: r.id, qty: box.value, hidden: hidden.value }); if (page.inRowConfirm) asking = true; } });
+  const buy = el({ click() {
+    pressed.push({ id: r.id, qty: box.value, hidden: hidden.value });
+    if (page.inRowConfirm || page.pageConfirm) asking = true;
+    if (page.pageConfirm) pageYes.push(yes);
+  } });
   const label = el({ textContent: "stock" });
   label.parentElement = { textContent: "stock" + r.stock };
   const row = el({
@@ -55,9 +64,9 @@ const rows = page.rows.map(r => {
       if (/buyButton/.test(sel)) return buy;
       return null;
     },
-    querySelectorAll: sel => (/srOnly/.test(sel) ? [label] : sel === "button" ? (asking ? [yes, no] : [buy]) : []),
+    querySelectorAll: sel => (/srOnly/.test(sel) ? [label] : sel === "button" ? (asking ? (page.pageConfirm ? [] : [yes, no]) : [buy]) : []),
   });
-  Object.defineProperty(row, "textContent", { get: () => (asking ? "Are you sure you want to buy " + r.name + "?" : r.name) });
+  Object.defineProperty(row, "textContent", { get: () => (!asking ? r.name : page.pageConfirm ? question() : "Are you sure you want to buy " + r.name + "?") });
   buy.closest = s => (/row___/.test(s) ? row : null);
   row.buy = buy;
   return row;
@@ -69,12 +78,13 @@ let homeAsking = false;
 const home = el({ textContent: page.homeLabel || "", click() { pressed.push("home"); if (page.homeAsks) homeAsking = true; } });
 const homeYes = el({ textContent: "Travel", click() { pressed.push("home-confirm"); } });
 const controls = () => (page.homeLabel ? [home].concat(homeAsking ? [homeYes] : []) : []);
+const confirmSel = s => /role=button/.test(s);
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
   body: el({ dataset: { abroad: "true", traveling: "false", country: "mexico" }, textContent: bag(page.bought) }),
   getElementById: () => null,
   querySelector: s => (s === "#user-money" ? el({ attrs: { "data-money": String(page.wallet) } }) : null),
-  querySelectorAll: s => (/row___/.test(s) ? rows : s === "button, a" ? controls() : []),
+  querySelectorAll: s => (/row___/.test(s) ? rows : s === "button, a" ? controls() : confirmSel(s) ? pageYes : []),
   createTextNode: t => ({ textContent: t, kids: [] }),
   addEventListener(t, f) { if (t === "click") onClick = f; },
 };
@@ -185,6 +195,17 @@ class AbroadJsTest(unittest.TestCase):
 
     def test_full_bag_without_a_fly_home_control_says_to_use_torns_page(self):
         self.assertIn("Bag full ✓ · fly home from Torn's page", self.run_page(bought=18)["button"])
+
+    def test_confirms_torns_buy_for_question_abroad(self):
+        # Seen live in Mexico: "Buy 18 x Dahlia for $X?" Yes / No, not "are you sure".
+        out = self.run_page(bought=11, click=True, clicks=2, pageConfirm=True)
+        self.assertTrue(out["buttons"][0].startswith("Confirm: buy 7 × Wolverine Plushie"), out["buttons"])
+        self.assertEqual(out["pressed"], [{"id": 261, "qty": "7", "hidden": "7"}, {"confirm": 261}])
+
+    def test_fly_home_that_doesnt_take_off_says_so_and_stops(self):
+        out = self.run_page(bought=18, homeLabel="Travel back to Torn", click=True, clicks=4)
+        self.assertIn("Torn didn't take off: fly home from Torn's page", out["buttons"][-2])
+        self.assertEqual(out["pressed"], ["home", "home", "home"])  # the 4th click only closes
 
     def test_full_bag_flies_home_and_confirms(self):
         out = self.run_page(bought=18, homeLabel="Travel back to Torn", homeAsks=True, click=True, clicks=2)

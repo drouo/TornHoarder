@@ -1340,8 +1340,12 @@ TEMPLATE = """\
     }
 
     // Torn's "Are you sure…? Yes / No" prompt, found by its wording.
+    // Torn's questions: "Are you sure…?" (city shops) or "Buy 18 x Dahlia for
+    // $5,400?" (the shop abroad, seen live).
+    var QUESTION = /are you sure|\\bbuy\\b[^?]*\\bfor\\s*\\$[0-9,]+\\s*\\?/i;
+
     function findConfirm(scope) {
-        var all = (scope || document).querySelectorAll("button, a, input[type=button], input[type=submit]");
+        var all = (scope || document).querySelectorAll("button, a, input[type=button], input[type=submit], [role=button]");
         for (var i = 0; i < all.length; i++) {
             var el = all[i];
             if (el.offsetParent === null || el.closest("#th-dock")) {
@@ -1351,10 +1355,10 @@ TEMPLATE = """\
                 continue;
             }
             var box = el;
-            for (var up = 0; up < 6 && box && !/are you sure/i.test(box.textContent || ""); up++) {
+            for (var up = 0; up < 6 && box && !QUESTION.test(box.textContent || ""); up++) {
                 box = box.parentElement;
             }
-            if (box && /are you sure/i.test(box.textContent || "")) {
+            if (box && QUESTION.test(box.textContent || "")) {
                 return el;
             }
         }
@@ -2532,7 +2536,24 @@ TEMPLATE = """\
                 visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
         }
 
+        // Clicked, but no question and no takeoff: the control wasn't the
+        // right one (Torn's page abroad hasn't been seen live yet).
+        var homeClicked = "";
+        var homeFailLogged = false;
+
+        function homeFailed() {
+            return homeAt && Date.now() - homeAt > 6000 && !homeConfirm() && document.body.dataset.traveling !== "true";
+        }
+
         function homeLabel(base) {
+            if (homeFailed()) {
+                if (!homeFailLogged) {
+                    homeFailLogged = true;
+                    console.log("[TornHoarder] abroad: clicked \\"" + homeClicked + "\\" but Torn didn't take off. Buttons and links: " +
+                        visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
+                }
+                return base + " · Torn didn't take off: fly home from Torn's page (click to close)";
+            }
             if (homeConfirm()) {
                 return "✈ Confirm: fly home";
             }
@@ -2691,7 +2712,7 @@ TEMPLATE = """\
             }
             var n = next(rows());
             if (!n) {
-                var home = homeConfirm() || homeControl();
+                var home = homeFailed() ? null : homeConfirm() || homeControl();
                 if (!home) {
                     dock.close();
                     return;
@@ -2699,6 +2720,7 @@ TEMPLATE = """\
                 if (!homeAt || Date.now() - homeAt > PENDING_MS) {
                     homeAt = Date.now();
                 }
+                homeClicked = (home.textContent || "").trim();
                 busyUntil = Date.now() + 800;
                 home.click();
                 render();

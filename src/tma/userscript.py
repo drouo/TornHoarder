@@ -1599,8 +1599,13 @@ TEMPLATE = """\
     // ---- City shop: buy what the app picked --------------------------------
     // The app links here with &thbuy=<id>:<qty>,... Click 1 fills one item's
     // amount and presses its BUY; click 2 confirms. One item per purchase.
-    function buyMode(spec, checkedSec) {
+    // `daily` (the day's shop plan, &thday=1): only buys since the latest
+    // midnight-TCT reset count, so a plan made yesterday works again today.
+    function buyMode(spec, checkedSec, daily) {
         var since = (Number(checkedSec) || 0) * 1000;
+        if (daily) {
+            since = Math.max(since, Math.floor(Date.now() / DAY_MS) * DAY_MS);
+        }
         var want = {};
         spec.split(",").forEach(function (part) {
             var a = part.split(":");
@@ -2806,7 +2811,7 @@ TEMPLATE = """\
 
     var buySpec = /[?&]thbuy=([0-9:,]+)/.exec(location.search);
     if (buySpec && (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0)) {
-        buyMode(buySpec[1], (/[?&]thchk=([0-9]+)/.exec(location.search) || [0, 0])[1]);
+        buyMode(buySpec[1], (/[?&]thchk=([0-9]+)/.exec(location.search) || [0, 0])[1], /[?&]thday=1/.test(location.search));
         return;
     }
 

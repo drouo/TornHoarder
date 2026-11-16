@@ -36,7 +36,7 @@ class DailyLimitClockTest(unittest.TestCase):
         self.assertEqual([s["label"] for s in route],
                          ["Bits 'n' Bobs: 60 × Beer, 10 × Bottle of Sake", "Jewelry Store: 30 × Diamond Ring"])
         self.assertIn("thbuy=180:60,294:10", route[0]["url"])
-        self.assertTrue(route[0]["url"].endswith(f"&thchk={MIDNIGHT}"))
+        self.assertTrue(route[0]["url"].endswith(f"&thchk={MIDNIGHT}&thday=1"))
 
     def test_plan_reaches_the_userscript_through_the_local_server(self):
         with TemporaryDirectory() as d:

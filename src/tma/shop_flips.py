@@ -109,13 +109,14 @@ def reset_in_s(now: Optional[float] = None) -> int:
 
 def plan_route(buys: pd.DataFrame, day: int) -> list[dict]:
     """The day's buys as run stops, one per shop. Links are stamped with the
-    day's start, so what you bought yesterday doesn't count against today."""
+    day's start and marked as daily (thday), so what you bought before the
+    latest reset doesn't count against today, even on a plan from yesterday."""
     route = []
     for shop, grp in buys.groupby("Shop", sort=False):
         url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
         if url:
             what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
-            route.append({"label": f"{shop}: {what}", "url": f"{url}&thchk={day}"})
+            route.append({"label": f"{shop}: {what}", "url": f"{url}&thchk={day}&thday=1"})
     return route
 
 

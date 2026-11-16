@@ -128,6 +128,21 @@ class AfterSellingTest(unittest.TestCase):
         self.assertIn("item 187: 0 of 20 bought (not in stock here now)", out["panel"])
         self.assertIn("press BUY yourself", out["after"])  # stub page has no BUY button
 
+    def test_a_plan_from_yesterday_counts_only_buys_since_the_reset(self):
+        # Live: yesterday's plan (thchk = yesterday's midnight) counted
+        # yesterday's 100 buys, so after the reset it thought it was done.
+        import time
+        today = int(time.time()) // 86400 * 86400
+        yesterday = today - 86400
+        store = {"tornhoarder.bought": json.dumps({"210": [[(yesterday + 3600) * 1000, 100]]})}
+        base = {"wallet": 0, "store": store,
+                "shopItems": [{"id": 210, "name": "Bag of Chocolate Kisses", "stock": "Candy (900 in stock)", "price": "$5"}]}
+        plan = dict(base, location={"pathname": "/shops.php", "search": f"?step=candy&thbuy=210:100&thchk={yesterday}&thday=1"})
+        self.assertEqual(self.run_page(plan)["button"], "Buy 100 × Bag of Chocolate Kisses · $500")
+        # A restock link (not daily) still counts everything since its check.
+        restock = dict(base, location={"pathname": "/shops.php", "search": f"?step=candy&thbuy=210:100&thchk={yesterday}"})
+        self.assertIn("Bought ✓", self.run_page(restock)["button"])
+
 
 class BuyUrlTest(unittest.TestCase):
     def test_links_carry_ids_and_quantities(self):

@@ -36,7 +36,7 @@ class StatusTest(unittest.TestCase):
 
     def test_fresh_results(self):
         write_last_run(self.d / "last_run.json", 143, "API inventory", now=NOW - 7200)
-        (self.d / "s.user.js").write_text("// @version      1.6.0\n", encoding="utf-8")
+        (self.d / "s.user.js").write_text("// @version      1.6.0.1794700000\n", encoding="utf-8")  # build-time suffix
         self.put("stock.json", {"checked": NOW - 600, "short": []})
         self.put("plan.json", {"checked": MIDNIGHT + 60, "route": [{}, {}]})
         self.put("travel.json", {"checked": NOW - 300, "sell": {}})

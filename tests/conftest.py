@@ -52,6 +52,10 @@ def no_catalog_refresh(monkeypatch):
 
     monkeypatch.setattr(my_listings, "fetch_my_listings", lambda *a, **k: ([], None))
 
+    from tma import traders
+
+    monkeypatch.setattr(traders, "fetch_pricelist", lambda *a, **k: ({}, "not fetched in tests"))
+
     from tma import profile
 
     monkeypatch.setattr(
@@ -95,6 +99,7 @@ def isolate_stats_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "CITYSHOP_STOCK_PATH", tmp_path / "cityshop_stock.csv")
     monkeypatch.setattr(paths, "STOCK_STATUS_PATH", tmp_path / "stock_status.json")
     monkeypatch.setattr(paths, "TRAVEL_PRICES_PATH", tmp_path / "travel_prices.json")
+    monkeypatch.setattr(paths, "TRADER_PRICES_PATH", tmp_path / "trader_prices.json")
     monkeypatch.setattr(paths, "SHOP_PLAN_PATH", tmp_path / "shop_plan.json")
     monkeypatch.setattr(paths, "TRIP_BUYS_PATH", tmp_path / "trip_buys.csv")
     monkeypatch.setattr(paths, "LAST_RUN_PATH", tmp_path / "last_run.json")

@@ -55,6 +55,22 @@ def save_reserves(reserves: dict[int, int]) -> None:
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+def load_traders() -> list[dict]:
+    """[{"id", "name"}]: players whose price lists the sell plan checks."""
+    from .traders import DEFAULT_TRADERS
+
+    saved = load_config().get("traders")
+    if not isinstance(saved, list):
+        return [dict(t) for t in DEFAULT_TRADERS]
+    return [{"id": int(t["id"]), "name": str(t.get("name") or t["id"])} for t in saved]
+
+
+def save_traders(traders: list[dict]) -> None:
+    cfg = load_config()
+    cfg["traders"] = [{"id": int(t["id"]), "name": str(t.get("name") or t["id"])} for t in traders]
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
 def load_minimums() -> dict[str, int]:
     """{"item:<id>" or "ammo:primary"/"ammo:secondary": minimum} to keep stocked."""
     return {str(k): int(v) for k, v in (load_config().get("stock_minimums") or {}).items()}

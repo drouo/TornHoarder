@@ -82,3 +82,20 @@ def best_offers(traders, cache: dict) -> dict[int, dict]:
             if iid not in best or price > best[iid]["price"]:
                 best[iid] = {"price": float(price), "trader_id": int(t["id"]), "trader": t.get("name") or str(t["id"])}
     return best
+
+
+def write_trade_plan(path: Path, runs: list[dict], pulls: list[dict], names: dict[int, str]) -> dict:
+    """What the userscript shows on Torn's trade and listings pages (/trade-plan):
+    per trader the items to give, and the market listings to pull first."""
+    plan = {
+        "checked": int(time.time()),
+        "traders": [{
+            "id": t["trader_id"], "name": names.get(t["trader_id"], str(t["trader_id"])), "total": t["total"],
+            "items": [{"id": i["item_id"], "name": i["Item"], "qty": i["Give"], "price": i["Each"]} for i in t["items"]],
+        } for t in runs],
+        "pull": [{"id": r.get("item_id"), "name": r.get("Item"), "amount": r.get("Amount"), "price": r.get("Your price"),
+                  "trader": r.get("Pull for"), "pays": r.get("Trader pays")} for r in pulls],
+    }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(plan), encoding="utf-8")
+    return plan

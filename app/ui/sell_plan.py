@@ -38,7 +38,7 @@ from tma.sell_plan import (
     reserve_for,
 )
 from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
-from tma.traders import PAGE_URL, TRADE_URL, best_offers, refresh_prices
+from tma.traders import PAGE_URL, TRADE_URL, best_offers, refresh_prices, write_trade_plan
 
 from .. import paths
 from ..paths import OC_ITEMS_PATH, SHOP_BUYS_PATH
@@ -543,6 +543,7 @@ def _render_trade_run(edited: pd.DataFrame, traders: list[dict], cache: dict, er
     names = {t["id"]: t["name"] for t in traders}
     runs = trade_rows(edited)
     pulls = [r for r in listings if r.get("Pull for")]
+    write_trade_plan(paths.TRADE_PLAN_PATH, runs, pulls, names)  # for the script on Torn's trade/listings pages
     if not runs and not pulls:
         st.caption("No trader pays more than a quick sale for anything you're selling.")
     for t in runs:

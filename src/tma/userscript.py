@@ -2904,6 +2904,136 @@ TEMPLATE = """\
         return;
     }
 
+    // ---- Trades: what to give a trader, and listings to pull first ----------
+    // The app's Sell plan writes /trade-plan. Torn's trade and listings pages
+    // haven't been seen live yet, so each one's layout goes to the app's log
+    // once; filling amounts comes after that.
+    function fetchTradePlan(done) {
+        if (typeof GM_xmlhttpRequest === "undefined") {
+            done({ traders: [], pull: [] });
+            return;
+        }
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: CFG.reportUrl.replace(/shop-report$/, "trade-plan"),
+            onload: function (res) {
+                var plan = null;
+                try {
+                    plan = JSON.parse(res.responseText);
+                } catch (e) { /* no plan */ }
+                done(plan || { traders: [], pull: [] });
+            },
+            onerror: function () { done({ traders: [], pull: [] }); }
+        });
+    }
+
+    var probedLayouts = {};
+
+    function logLayout(what) {
+        if (probedLayouts[what]) {
+            return;
+        }
+        probedLayouts[what] = true;
+        var controls = Array.prototype.map.call(document.querySelectorAll("button, a, input, select, [role=button]"), function (b) {
+            if (b.offsetParent === null || (b.closest && b.closest("#th-dock, #th-pull"))) {
+                return "";
+            }
+            var t = (b.textContent || b.value || "").trim().slice(0, 40);
+            return "<" + String(b.tagName || "").toLowerCase() + (b.type ? " type=" + b.type : "") +
+                (b.name ? " name=" + b.name : "") + (b.className ? " class=" + String(b.className).slice(0, 60) : "") + ">" +
+                (t ? " " + t : "");
+        }).filter(Boolean).slice(0, 150);
+        thLog("[TornHoarder] layout " + what + ": " + controls.join(" | "));
+    }
+
+    function hashParam(key) {
+        var m = new RegExp("[#&?]" + key + "=([^&]*)").exec(location.hash || "");
+        return m ? decodeURIComponent(m[1]) : "";
+    }
+
+    function tradeMode() {
+        var btn = greenButton("th-trade-btn");
+        var panel = infoPanel();
+        var dock = makeDock(btn, panel);
+        var plan = { traders: [] };
+
+        // The trade's later steps drop userID from the URL: remember who it's with.
+        function trader() {
+            var id = hashParam("userID");
+            if (id) {
+                writePref("tornhoarder.tradeWith", id);
+            } else {
+                id = readPref("tornhoarder.tradeWith", "");
+            }
+            var all = plan.traders || [];
+            return all.filter(function (t) { return String(t.id) === String(id); })[0] || null;
+        }
+
+        function draw() {
+            logLayout("trade " + (hashParam("step") || "?"));
+            var t = trader();
+            if (!t) {
+                btn.textContent = "Trade: nothing planned for this player (click to close)";
+                setLines(panel, ["The app's Sell plan lists what each of your traders pays more for than a quick sale."]);
+                return;
+            }
+            btn.textContent = "Give " + t.name + " " + t.items.length + " item(s) · " + fmtMoney(t.total) + " (click to close)";
+            setLines(panel, ["Add these to the trade with Torn's Add items, then " + t.name + " accepts:"].concat(
+                t.items.map(function (i) {
+                    return "· " + Number(i.qty).toLocaleString("en-US") + " × " + i.name + " at " + fmtMoney(i.price) +
+                        " = " + fmtMoney(i.qty * i.price);
+                })));
+        }
+
+        btn.addEventListener("click", function () { dock.close(); });
+        fetchTradePlan(function (p) {
+            plan = p;
+            draw();
+        });
+        setInterval(draw, 2000);
+    }
+
+    // Item Market "your listings": the ones a trader pays more for than they net.
+    function pullMode() {
+        var pill = null;
+        var plan = null;
+
+        function draw() {
+            if (!/viewListing/i.test(location.hash || "") || !plan || !(plan.pull || []).length) {
+                if (pill) {
+                    pill.style.display = "none";
+                }
+                return;
+            }
+            logLayout("viewListing");
+            if (!pill) {
+                pill = document.createElement("div");
+                pill.id = "th-pull";
+                pill.style.cssText = "position:fixed;right:12px;top:90px;z-index:999997;max-width:340px;padding:8px 12px;" +
+                    "border-radius:8px;background:rgba(0,0,0,.9);border:1px solid #c62828;color:#eee;" +
+                    "font:13px/1.5 Arial,sans-serif;";
+                document.body.appendChild(pill);
+            }
+            pill.style.display = "block";
+            setLines(pill, ["Pull these listings: a trader pays more than they net after tax"].concat(
+                plan.pull.map(function (r) {
+                    return "· " + r.name + " ×" + r.amount + " at " + fmtMoney(r.price) + " → " + r.trader + " pays " +
+                        fmtMoney(r.pays);
+                })).concat(["Then Run the app again to add them to the trade."]));
+        }
+
+        fetchTradePlan(function (p) {
+            plan = p;
+            draw();
+        });
+        setInterval(draw, 2000);
+    }
+
+    if (location.pathname.indexOf("/trade.php") === 0) {
+        tradeMode();
+        return;
+    }
+
     var buySpec = /[?&]thbuy=([0-9:,]+)/.exec(location.search);
     if (buySpec && (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0)) {
         buyMode(buySpec[1], (/[?&]thchk=([0-9]+)/.exec(location.search) || [0, 0])[1], /[?&]thday=1/.test(location.search));
@@ -2919,6 +3049,7 @@ TEMPLATE = """\
 
     if (location.pathname.indexOf("/page.php") === 0 && /sid=ItemMarket/i.test(location.search)) {
         listMode();
+        pullMode();
     }
 })();
 """

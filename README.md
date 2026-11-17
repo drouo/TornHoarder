@@ -83,6 +83,7 @@ Each item gets a plan automatically. The **Sell plan** tab lets you change it, a
 | **Dump** | worth < $20k each and the stack < $1M | 5% under the cheapest listing |
 | **Competitive** | worth ≥ $20k each, or a stack ≥ $1M | cheapest listing − $1 |
 | **Top dollar** | a weapon/armor copy with quality ≥ 50, or a Competitive item with < 20 listings | Greedy (upper quartile) |
+| **Trade** | a trader pays more than a Dump/Competitive sale nets after the 5% tax, and more than any shop | the trader's price; not listed (see [Traders](#traders)) |
 | **Shop** | a city shop pays at least the market price after Torn's 5% sales tax | the shop's price; not listed |
 | **Keep** | only when you choose it | never sold |
 
@@ -97,6 +98,15 @@ Only the surplus is ever sold. The **Keeping** column shows how many of each ite
 - **Weapons and armor:** the copies kept are your best by quality. Equipped gear is never touched.
 - **Museum set pieces:** when a complete set is worth more exchanged for points than sold (see [Museum sets](#museum-sets)), one of each piece per complete set is kept. Extras still sell.
 - **Everything else:** 0 kept.
+
+## Traders
+
+Some players buy items outright at posted prices on [weav3r.dev](https://weav3r.dev). The Sell plan reads each trader's price list (`weav3r.dev/api/pricelist/<player ID>`, re-read every 15 minutes and cached in `data/trader_prices.json`). It starts with Shekels (3878831); add more under **Traders** on the Sell plan tab.
+
+- **Never quick-sell what a trader pays more for.** A Dump or Competitive item switches to **Trade** when the best trader's price beats its after-tax market net and any shop; a trade has no tax. Top dollar listings and weapon/armor copies stay on the market (traders pay one price whatever a copy rolled).
+- **Trade to <trader>** lists what to give each trader and the payout, with **Start trade with <trader> →** (Torn's trade page with that player).
+- **Pull from the market first** lists your Item Market listings a trader pays more for than they'd net. Pull them on Torn, then Run again so they join the trade.
+- On Torn, the userscript shows the same lists on the trade page and on your listings. Those pages haven't been seen live yet, so each one's layout is written once to `data/tornhoarder.log.jsonl`; filling the trade's amounts comes after that.
 
 ## Shop run
 

@@ -3081,6 +3081,8 @@ TEMPLATE = """\
     // Which planned items to leave out of the trade; kept across Torn's trade
     // steps (each one is a page load).
     var TRADE_SKIP_KEY = "tornhoarder.tradeSkip";
+    var TRADE_AUTO_KEY = "tornhoarder.tradeAuto";
+    var TRADE_AUTO_MS = 15 * 60 * 1000;
 
     // Types into a field and leaves it, as tabbing out would: Torn's older pages
     // (trade) only enable their buttons on keyup/blur, not on input.
@@ -3147,6 +3149,49 @@ TEMPLATE = """\
         var filled = 0;      // items whose amount was filled on this Add items page
         var missing = [];    // picked items with no row there
         var lastStep = "";
+
+        function pressAdd() {
+            var add = addButton();
+            thLog("[TornHoarder] trade: ADD TO TRADE pressed with " + filled + " item(s)" + (add ? "" : " (button not found)"));
+            if (add) {
+                add.click();
+            }
+        }
+
+        // After INITIATE pressed with the button, the rest runs by itself:
+        // the trade view goes to Add items (once), and Add items fills every
+        // picked item and presses ADD TO TRADE, only when all were found.
+        // Accepting stays yours. Expires after TRADE_AUTO_MS.
+        function auto(t) {
+            try {
+                var a = JSON.parse(readPref(TRADE_AUTO_KEY, "null"));
+                return a && a.trader === String(t.id) && Date.now() - a.at < TRADE_AUTO_MS ? a : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function autoStep(t, st) {
+            var a = auto(t);
+            if (!a) {
+                return;
+            }
+            if (st === "view" && !a.went && tradeId() && picked(t).some(function (i) { return !inTrade(i); })) {
+                a.went = true;
+                writePref(TRADE_AUTO_KEY, JSON.stringify(a));
+                thLog("[TornHoarder] trade: auto: trade " + tradeId() + " started, going to Add items");
+                location.hash = "#step=add&ID=" + tradeId();
+            } else if (st === "add" && !filled && addRows().length) {
+                writePref(TRADE_AUTO_KEY, "null");  // one go per trade, whatever happens next
+                fillAmounts(t);
+                if (filled && !missing.length) {
+                    pressAdd();
+                } else {
+                    thLog("[TornHoarder] trade: auto: stopped before ADD TO TRADE (" + filled + " filled, not found: " +
+                        (missing.join(", ") || "-") + ")");
+                }
+            }
+        }
 
         function buttonLabelled(re) {
             return Array.prototype.filter.call(document.querySelectorAll("input[type=submit], button"), function (b) {
@@ -3263,6 +3308,9 @@ TEMPLATE = """\
             var total = sel.reduce(function (n, i) { return n + i.qty * i.price; }, 0);
             var st = step();
             probeHtml(st);
+            if (s.open !== false && sel.length) {
+                autoStep(t, st);
+            }
             if (s.open === false) {
                 btn.textContent = "⛔ " + t.name + " can't trade now: " + s.status + " (click to close)";
             } else if (!sel.length) {
@@ -3355,15 +3403,12 @@ TEMPLATE = """\
                 thLog("[TornHoarder] trade: initiating with " + t.name + " (" + picked(t).length + " item(s))" +
                     (box ? ", description filled" : ", no description box found") + (go.disabled ? ", waiting for INITIATE" : ""));
                 started = true;
+                writePref(TRADE_AUTO_KEY, JSON.stringify({ trader: String(t.id), at: Date.now(), went: false }));
                 pressWhenEnabled(go, 10);
             } else if (st === "add" && !filled) {
                 fillAmounts(t);
             } else if (st === "add") {
-                var add = addButton();
-                thLog("[TornHoarder] trade: ADD TO TRADE pressed with " + filled + " item(s)" + (add ? "" : " (button not found)"));
-                if (add) {
-                    add.click();
-                }
+                pressAdd();
             } else if (st === "view" && tradeId() && picked(t).some(function (i) { return !inTrade(i); })) {
                 location.hash = "#step=add&ID=" + tradeId();
             } else {

@@ -2,6 +2,7 @@
 app's trade plan says to give each trader, and which listings to pull."""
 
 import json
+import time
 import shutil
 import subprocess
 import sys
@@ -76,7 +77,7 @@ if (page.skip) made.find(e => e.textContent && e.textContent.indexOf("✓ " + pa
 const before = btn ? btn.textContent : null;
 for (let i = 0; i < (page.click === true ? 1 : page.click || 0); i++) btn.onclick();
 const pill = made.find(e => e.id === "th-pull");
-process.stdout.write(JSON.stringify({ before, clicked, desc: desc.value, hash: location.hash,
+process.stdout.write(JSON.stringify({ before, clicked, auto: store["tornhoarder.tradeAuto"] || null, desc: desc.value, hash: location.hash,
   amounts: Object.fromEntries(amounts.map(a => [a.forItem, a.value])), skips: store["tornhoarder.tradeSkip"] || null,
   button: btn ? btn.textContent : null, panel: made.map(text).join("\n"),
   pill: pill ? text(pill) : null, logs, tradeWith: store["tornhoarder.tradeWith"] || null }));
@@ -143,6 +144,42 @@ class TradeJsTest(unittest.TestCase):
         done = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, bodyText="Wolverine Plushie x354",
                              store={"tornhoarder.tradeWith": "3878831"})
         self.assertTrue(done["button"].startswith("All 1 item(s) are in: check the money from Shekels ($1,512,642)"), done["button"])
+
+    def auto_store(self, at=None, went=False):
+        at = int(time.time() * 1000) if at is None else at
+        return {"tornhoarder.tradeWith": "3878831",
+                "tornhoarder.tradeAuto": json.dumps({"trader": "3878831", "at": at, "went": went})}
+
+    def test_initiate_arms_the_rest_of_the_trade(self):
+        out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", start=True, click=True)
+        self.assertEqual(json.loads(out["auto"])["trader"], "3878831")
+
+    def test_after_initiate_the_trade_view_goes_to_add_items_by_itself_once(self):
+        out = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, store=self.auto_store())
+        self.assertEqual(out["hash"], "#step=add&ID=13897881")
+        self.assertTrue(json.loads(out["auto"])["went"])
+        again = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, store=self.auto_store(went=True))
+        self.assertEqual(again["hash"], "#step=view&ID=13897881")
+
+    def test_add_items_fills_and_adds_by_itself_when_all_are_found(self):
+        rows = [{"id": 261, "name": "Wolverine Plushie", "have": 400}]
+        out = self.run_page(path="/trade.php", hash="#step=add&ID=13897881", addRows=rows, store=self.auto_store())
+        self.assertEqual(out["amounts"], {"Wolverine Plushie": "354"})
+        self.assertEqual(out["clicked"], ["add"])
+        self.assertEqual(out["auto"], "null")
+
+    def test_add_items_stops_before_adding_if_an_item_is_missing(self):
+        plan = json.loads(json.dumps(PLAN))
+        plan["traders"][0]["items"].append({"id": 1485, "name": "Shark Fin", "qty": 30, "price": 64457.0})
+        rows = [{"id": 261, "name": "Wolverine Plushie", "have": 400}]
+        out = self.run_page(path="/trade.php", hash="#step=add&ID=13897881", plan=plan, addRows=rows, store=self.auto_store())
+        self.assertEqual(out["clicked"], [])
+        self.assertIn("(not found: Shark Fin)", out["button"])
+        self.assertTrue(any("auto: stopped before ADD TO TRADE (1 filled, not found: Shark Fin)" in m for m in out["logs"]))
+
+    def test_an_old_start_does_nothing_by_itself(self):
+        out = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, store=self.auto_store(at=0))
+        self.assertEqual(out["hash"], "#step=view&ID=13897881")
 
     def test_left_out_items_drop_from_the_trade_and_stay_out(self):
         plan = json.loads(json.dumps(PLAN))

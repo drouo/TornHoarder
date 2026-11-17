@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app.ui.sell_plan import item_plans, overrides_from_edit, plan_rows
+from app.ui.sell_plan import flag_trade_listings, item_plans, overrides_from_edit, plan_rows, trade_rows
 from tma import config
 from tma.crime_items import crime_hint, parse_oc_items
 from tma.sell_plan import KEEP_ALL, MARKET_FEE, SellRules, auto_plan, decide, price_guards, reserve_for
@@ -79,6 +79,23 @@ class DecideTest(unittest.TestCase):
         # No switch to Shop, but the price is lifted to the shop's net: ceil(500 / 0.95).
         d = _decide(fast=100, fair=100, greedy=150, shop_price=500, override="competitive")
         self.assertEqual((d.plan, d.price, d.auto), ("competitive", 527, False))
+
+    def test_switches_to_trade_when_a_trader_beats_market_and_shop(self):
+        # Seen live: Wolverine Plushies quick-sell at $4,299 (nets $4,084), Shekels pays $4,273.
+        d = _decide(qty=354, fast=4_300, fair=6_667, shop_price=27, trade_price=4_273, trader="Shekels")
+        self.assertEqual((d.plan, d.price, d.proceeds), ("trade", 4_273, 4_273 * 354))
+        self.assertIn("Shekels pays $4.27k vs $4.08k on market", d.reason)
+
+    def test_trade_only_replaces_quick_sales(self):
+        self.assertEqual(_decide(fast=100, fair=100, trade_price=90).plan, "dump")  # market nets more
+        self.assertEqual(_decide(fast=100, fair=100, shop_price=95, trade_price=94).plan, "shop")  # shop pays more
+        self.assertEqual(_decide(fast=29_999, fair=31_000, greedy=33_000, num_listings=4, trade_price=32_000).plan, "top")
+        self.assertEqual(_decide(fast=100, fair=100, trade_price=500, override="dump").plan, "dump")
+
+    def test_trade_override_without_a_trader_price_is_flagged(self):
+        d = _decide(fast=100, fair=100, override="trade")
+        self.assertEqual((d.plan, d.price), ("trade", None))
+        self.assertIn("no trader", d.reason)
 
     def test_keep_lists_nothing(self):
         d = _decide(qty=3, fast=100, fair=100, override="keep")
@@ -214,6 +231,40 @@ class CrimeHintTest(unittest.TestCase):
 def _row(iid, name, qty, is_stat=False, uid=None):
     return {"item_id": iid, "Item": name, "My quantity": qty, "Fast-sell price": 1000.0, "Fair price": 1100.0,
             "Greedy price": 1200.0, "is_stat": is_stat, "uid": uid}
+
+
+SHEKELS = {"price": 1100.0, "trader_id": 3878831, "trader": "Shekels"}
+
+
+class TradePlanTest(unittest.TestCase):
+    PROFILES = {"261": {"id": 261, "type": "Plushie"}, "8": {"id": 8, "type": "Weapon", "category": "Melee"}}
+    RULES = SellRules(sell_categories=("Plushie", "Melee"), keep_one_categories=())
+
+    def test_items_a_trader_pays_more_for_go_to_the_trade_but_copies_stay_listed(self):
+        rows = plan_rows([_row(261, "Wolverine Plushie", 10), _row(8, "Axe", 1, is_stat=True, uid=5)], {}, {},
+                         self.PROFILES, self.RULES, {}, offers={261: SHEKELS, 8: SHEKELS})
+        plush, axe = rows
+        self.assertEqual((plush["Plan"], plush["List price"], plush["Est. proceeds"], plush["trader_id"]),
+                         ("Trade", 1100, 11_000, 3878831))
+        self.assertNotEqual(axe["Plan"], "Trade")
+        [run] = trade_rows(pd.DataFrame(rows))
+        self.assertEqual((run["trader_id"], run["total"], run["items"][0]["Give"]), (3878831, 11_000.0, 10))
+
+    def test_script_plan_holds_trade_items_off_the_market(self):
+        summary = pd.DataFrame([{"item_id": 261, "my_quantity": 10, "fast_sell_price": 1000.0, "fair_price": 1100.0,
+                                 "greedy_price": 1200.0, "num_clean_listings": 100}])
+        edited = pd.DataFrame([{"item_id": 261, "is_stat": False, "List price": 1100, "Qty": 10,
+                                "Keeping": 0, "Selling": 10, "quality": None}])
+        plan = item_plans(summary, edited, self.PROFILES, self.RULES, {}, offers={261: SHEKELS})[261]
+        self.assertEqual((plan["plan"], plan["trader"], plan["qty"], plan["list"]), ("trade", "Shekels", 10, 1100))
+
+    def test_listings_a_trader_pays_more_for_are_flagged_to_pull(self):
+        listed = [{"item_id": 261, "Item": "Wolverine Plushie", "uid": None, "Amount": 50, "Your price": 1150.0, "Status": ""},
+                  {"item_id": 261, "Item": "Wolverine Plushie", "uid": None, "Amount": 5, "Your price": 1200.0, "Status": ""}]
+        cheap, dear = flag_trade_listings(listed, {261: SHEKELS})
+        self.assertEqual(cheap["Pull for"], "Shekels")  # nets $1,092.50 < $1,100
+        self.assertIn("pull this listing and trade it", cheap["Status"])
+        self.assertNotIn("Pull for", dear)  # nets $1,140
 
 
 class PlanRowsReserveTest(unittest.TestCase):

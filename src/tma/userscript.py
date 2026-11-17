@@ -382,6 +382,10 @@ TEMPLATE = """\
         if (!plan || plan === "keep") {
             return { hold: "Keep" };
         }
+        if (plan === "trade") {
+            // Never listed: a trader pays more than it would net here.
+            return { hold: "trade to " + (entry.trader || "your trader") + " instead (pays more)" };
+        }
         if (entry.auto !== false && quality != null && quality >= CFG.topMinQuality) {
             plan = "top";
         }
@@ -477,7 +481,7 @@ TEMPLATE = """\
                     plan = e.fallback.plan;
                     list = e.fallback.list;
                 }
-                if (!plan || plan === "keep") {
+                if (!plan || plan === "keep" || plan === "trade") {
                     return;
                 }
                 if (copies != null) {

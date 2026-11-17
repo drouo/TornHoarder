@@ -12,6 +12,8 @@ you sell. Each item gets one plan:
 - top          high-roll weapon/armor copies, or valuable items with only a
                handful of listings (slow, illiquid markets): list at the upper
                quartile and wait. Racing to the bottom there just loses money.
+- trade        a trader (tma.traders) pays more than the market nets after
+               tax and more than any shop: trade it to them (no tax, no listing).
 - shop         a city shop pays at least what the market nets after Torn's
                sales tax — sell it there instead (instant, no listing).
 - keep         never list.
@@ -33,11 +35,12 @@ MARKET_FEE = 0.05
 # Never auto-list under this fraction of Torn's own reference price.
 REF_GUARD = 0.5
 
-PLANS = ("dump", "competitive", "top", "shop", "keep")
+PLANS = ("dump", "competitive", "top", "trade", "shop", "keep")
 PLAN_LABELS = {
     "dump": "Dump",
     "competitive": "Competitive",
     "top": "Top dollar",
+    "trade": "Trade",
     "shop": "Shop",
     "keep": "Keep",
 }
@@ -149,7 +152,7 @@ def reserve_for(
 class Decision:
     plan: str
     reason: str
-    price: Optional[int]  # per-unit list price (shop: what the shop pays)
+    price: Optional[int]  # per-unit list price (shop/trade: what the shop or trader pays)
     proceeds: float  # expected cash for the whole quantity, after fees
     auto: bool  # False when the plan came from a user override
 
@@ -209,6 +212,8 @@ def decide(
     override: Optional[str] = None,
     ref_price: Optional[float] = None,
     sellable: bool = True,
+    trade_price: Optional[float] = None,
+    trader: Optional[str] = None,
 ) -> Decision:
     """`ref_price` is Torn's own market_price for the item: an automatic plan
     that would list under REF_GUARD of it is held as Keep for a manual look
@@ -227,10 +232,24 @@ def decide(
     if plan == "keep":
         return Decision("keep", reason, None, 0.0, auto)
 
-    price = plan_price(plan, fast, fair, greedy, rules) if plan != "shop" else None
+    price = plan_price(plan, fast, fair, greedy, rules) if plan not in ("shop", "trade") else None
+    trade = float(trade_price) if trade_price and trade_price > 0 else None
+    who = trader or "a trader"
+    if auto and plan in ("dump", "competitive") and trade is not None:
+        # Never quick-sell what a trader pays more for: a trade has no tax.
+        market_net = price * (1.0 - MARKET_FEE) if price else 0.0
+        if trade > max(market_net, shop or 0.0):
+            plan = "trade"
+            reason = f"{who} pays {money(trade)} vs {money(market_net)} on market after {MARKET_FEE:.0%} tax" + (
+                f" and {money(shop)} at a shop" if shop else "")
     if auto and plan in ("dump", "competitive") and shop is not None:
         if price is None or shop >= price * (1.0 - MARKET_FEE):
             plan, reason = "shop", f"shop pays {money(shop)} vs {money(price or 0)} on market less {MARKET_FEE:.0%} tax"
+
+    if plan == "trade":
+        if trade is None:
+            return Decision("trade", reason + " (no trader buys this)", None, 0.0, auto)
+        return Decision("trade", reason, int(round(trade)), trade * qty, auto)
 
     if plan == "shop":
         if shop is None:

@@ -1,5 +1,5 @@
 """Sell plan tab: every item gets an automatic plan (Dump / Competitive /
-Top dollar / Shop / Keep) with a list price to match. Changing an item's
+Top dollar / Trade / Shop / Keep) with a list price to match. Changing an item's
 Plan is remembered across runs (~/.tma_config.json); the resulting prices
 feed the autofill script.
 
@@ -16,7 +16,10 @@ import streamlit as st
 
 from dataclasses import replace
 
-from tma.config import load_minimums, load_reserves, load_sell_prefs, save_reserves, save_sell_prefs
+from tma.config import (
+    load_minimums, load_reserves, load_sell_prefs, load_traders, save_reserves, save_sell_prefs, save_traders,
+)
+from tma.http_client import session_for_requests
 from tma.stock_minimums import as_reserves
 from tma.crime_items import load_oc_items
 from tma.fmt import money
@@ -35,7 +38,9 @@ from tma.sell_plan import (
     reserve_for,
 )
 from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
+from tma.traders import PAGE_URL, TRADE_URL, best_offers, refresh_prices
 
+from .. import paths
 from ..paths import OC_ITEMS_PATH, SHOP_BUYS_PATH
 from .search import searchable_editor
 
@@ -75,6 +80,7 @@ def plan_rows(
     oc_items: Optional[dict] = None,
     reserves: Optional[dict[int, int]] = None,
     museum: Optional[dict[int, tuple[int, str]]] = None,
+    offers: Optional[dict[int, dict]] = None,
 ) -> list[dict]:
     """One row per pricing-table row (stackables combined, one per weapon/armor copy).
 
@@ -85,6 +91,7 @@ def plan_rows(
     """
     reserves = reserves or {}
     museum = museum or {}
+    offers = offers or {}
     keep_by_item: dict[int, tuple[int, str]] = {}
     for ro in rows_out:
         iid = int(ro["item_id"])
@@ -115,6 +122,8 @@ def plan_rows(
             # A copy's quality-curve price can rest on one cheap listing in a thin
             # band; no copy is worth less than the item's cheapest listing.
             fast = max(fast or 0, _num(summ.get("fast_sell_price")))
+        # Traders pay one price whatever a weapon/armor copy rolled: copies stay on the market.
+        offer = None if ro.get("is_stat") else offers.get(iid)
         kwargs = dict(
             qty=selling,
             fast=fast,
@@ -126,6 +135,8 @@ def plan_rows(
             rules=rules,
             ref_price=prof.get("market_price"),
             sellable=is_sellable(prof, rules),
+            trade_price=offer["price"] if offer else None,
+            trader=offer["trader"] if offer else None,
         )
         auto: Decision = decide(**kwargs)
         d: Decision = decide(**kwargs, override=overrides.get(iid)) if iid in overrides else auto
@@ -155,6 +166,8 @@ def plan_rows(
                 "Floor": _num(summ.get("floor_price")),
                 "Fair": kwargs["fair"],
                 "Shop pays": shop_price_for(prof, iid, known),
+                "Trader pays": offer["price"] if offer else None,
+                "trader_id": offer["trader_id"] if offer else None,
                 "Est. proceeds": int(round(d.proceeds)),
                 "Stack value": float(kwargs["fair"] or kwargs["fast"] or 0.0) * qty,
                 "uid": ro.get("uid"),
@@ -170,6 +183,7 @@ def item_plans(
     rules: SellRules,
     overrides: dict[int, str],
     known: Optional[dict] = None,
+    offers: Optional[dict[int, dict]] = None,
 ) -> dict[int, dict]:
     """Per-item plan for the autofill script.
 
@@ -183,6 +197,7 @@ def item_plans(
         iid = int(r["item_id"])
         prof = profiles.get(str(iid)) or {}
         shop_price = shop_price_for(prof, iid, known)
+        offer = None if iid in stat_ids else (offers or {}).get(iid)
         kwargs = dict(
             qty=int(_num(r.get("my_quantity")) or 0),
             fast=_num(r.get("fast_sell_price")),
@@ -195,6 +210,8 @@ def item_plans(
             # would hold every copy; the script applies refMin per copy instead.
             ref_price=None if iid in stat_ids else prof.get("market_price"),
             sellable=is_sellable(prof, rules),
+            trade_price=offer["price"] if offer else None,
+            trader=offer["trader"] if offer else None,
         )
         d = decide(**kwargs, shop_price=shop_price, override=overrides.get(iid))
         shop_min, ref_min = price_guards(shop_price, prof.get("market_price"))
@@ -207,6 +224,8 @@ def item_plans(
             # A plan you picked yourself is listed anyway (the app shows the warning).
             "refMin": ref_min if d.auto else None,
         }
+        if d.plan == "trade":
+            plans[iid]["trader"] = offer["trader"] if offer else None  # never listed: the Add Listing page holds it
         if d.plan == "shop":
             # Still in inventory on the Add Listing page means no shop took it
             # (do the shop run first): list it with its market plan instead.
@@ -219,7 +238,7 @@ def item_plans(
         entry = plans[iid]
         if not bool(rows["is_stat"].iloc[0]):
             row = rows.iloc[0]
-            if entry["plan"] != "shop":
+            if entry["plan"] not in ("shop", "trade"):
                 price = _num(row.get("List price"))
                 entry["list"] = int(price) if price else None
             # Only the surplus is ever listed or sold; the reserve stays put.
@@ -322,7 +341,7 @@ def _render_rules(saved: dict) -> SellRules:
             )
         st.caption(
             f"Market proceeds are after Torn's {MARKET_FEE:.0%} item-market sales tax. Dump/Competitive items switch "
-            "to **Shop** automatically when a city shop pays at least that much. OC items come from Torn's "
+            "to **Trade** when a trader pays more, or to **Shop** when a city shop pays at least that much. OC items come from Torn's "
             "organized-crimes list; other crime items from their in-game description. Type a number in "
             "**Keeping** to set any item by hand."
         )
@@ -357,9 +376,12 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     for iid, n in as_reserves(load_minimums()).items():
         effective[iid] = max(effective.get(iid, 0), n)
     museum_sets = museum_table(ctx["rows_out"], summary_by_id, profiles, an.get("museum") or {})
+    traders = load_traders()
+    trader_cache, trader_errors = refresh_prices(paths.TRADER_PRICES_PATH, traders, session_for_requests())
+    offers = best_offers(traders, trader_cache)
     rows = plan_rows(
         ctx["rows_out"], ctx["real_q_by_idx"], summary_by_id, profiles, rules, overrides, known, oc_items, effective,
-        museum_holds(museum_sets),
+        museum_holds(museum_sets), offers,
     )
     # data_editor stores edits by row position, so the order must not depend
     # on the plan (which edits change) — stack value doesn't.
@@ -377,7 +399,8 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
         width="stretch",
         hide_index=True,
         column_order=(
-            "Plan", "Item", "Qty", "Keeping", "Selling", "List price", "Est. proceeds", "Why", "Floor", "Fair", "Shop pays"
+            "Plan", "Item", "Qty", "Keeping", "Selling", "List price", "Est. proceeds", "Why", "Floor", "Fair", "Shop pays",
+            "Trader pays",
         ),
         column_config={
             "Plan": st.column_config.SelectboxColumn(options=[PLAN_LABELS[p] for p in PLANS], required=True),
@@ -391,6 +414,7 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
             "Floor": st.column_config.NumberColumn(format="compact", disabled=True),
             "Fair": st.column_config.NumberColumn(format="compact", disabled=True),
             "Shop pays": st.column_config.NumberColumn(format="compact", disabled=True),
+            "Trader pays": st.column_config.NumberColumn(format="compact", disabled=True),
         },
     )
 
@@ -406,13 +430,15 @@ def render_sell_plan(an: dict, ctx: dict) -> dict:
     _render_totals(edited)
     _render_money(an.get("money"), float(edited.apply(_row_proceeds, axis=1).sum()))
     shop_run = build_shop_run(shop_rows(edited), profiles, known)
+    listings = flag_trade_listings(an.get("my_listings") or [], offers)
+    _render_trade_run(edited, traders, trader_cache, trader_errors, listings)
     _render_shop_run(shop_run)
     _render_market_run(edited)
     _render_museum(museum_sets, (an.get("museum") or {}).get("point_price"))
-    _render_my_listings(an.get("my_listings") or [])
+    _render_my_listings(listings)
 
     return {
-        "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known),
+        "item_plans": item_plans(an["df_summary"], edited, profiles, rules, new_overrides, known, offers),
         "rules": rules,
         "shop_run": shop_run,
     }
@@ -447,8 +473,8 @@ def _row_proceeds(row) -> float:
     price = _num(row.get("List price"))
     if plan == "keep" or not price:
         return 0.0
-    if plan == "shop":
-        return float(price) * row["Selling"]
+    if plan in ("shop", "trade"):
+        return float(price) * row["Selling"]  # no market tax
     return float(price) * row["Selling"] * (1.0 - MARKET_FEE)
 
 
@@ -481,6 +507,89 @@ def _render_shop_run(shop_run: dict) -> None:
         "same spot: click it to sell this shop's items, then again for the next shop. Only Shop-plan items are "
         "filled; weapon/armor copies are matched one by one, so a high-roll copy is never sold to a shop."
     )
+
+
+def trade_rows(edited: pd.DataFrame) -> list[dict]:
+    """Trade-plan items grouped by trader: [{"trader_id", "items", "total"}], biggest first."""
+    trade = edited[(edited["Plan"] == PLAN_LABELS["trade"]) & (edited["Selling"] > 0) & edited["trader_id"].notna()]
+    out: dict[int, dict] = {}
+    for _, r in trade.iterrows():
+        t = out.setdefault(int(r["trader_id"]), {"trader_id": int(r["trader_id"]), "items": [], "total": 0.0})
+        price = float(_num(r["List price"]) or 0)
+        n = int(r["Selling"])
+        t["items"].append({"item_id": int(r["item_id"]), "Item": r["Item"], "Give": n, "Each": price, "Total": price * n})
+        t["total"] += price * n
+    return sorted(out.values(), key=lambda t: -t["total"])
+
+
+def flag_trade_listings(rows: list[dict], offers: dict[int, dict]) -> list[dict]:
+    """Marks Item Market listings a trader pays more for than they'd net
+    after tax: pull them and trade them instead."""
+    out = []
+    for row in rows:
+        row = dict(row)
+        offer = None if row.get("uid") else offers.get(int(row.get("item_id") or 0))
+        net = float(row.get("Your price") or 0) * (1.0 - MARKET_FEE)
+        if offer and offer["price"] > net:
+            row["Pull for"] = offer["trader"]
+            row["Trader pays"] = offer["price"]
+            row["Status"] = (f"{offer['trader']} pays {money(offer['price'])} vs {money(net)} after tax: "
+                             "pull this listing and trade it")
+        out.append(row)
+    return out
+
+
+def _render_trade_run(edited: pd.DataFrame, traders: list[dict], cache: dict, errors: list[str], listings: list[dict]) -> None:
+    names = {t["id"]: t["name"] for t in traders}
+    runs = trade_rows(edited)
+    pulls = [r for r in listings if r.get("Pull for")]
+    if not runs and not pulls:
+        st.caption("No trader pays more than a quick sale for anything you're selling.")
+    for t in runs:
+        name = names.get(t["trader_id"], str(t["trader_id"]))
+        st.markdown(
+            f"**Trade to {name}**: {sum(i['Give'] for i in t['items']):,} items · {money(t['total'])}, no tax"
+            .replace("$", "\\$")
+        )
+        st.dataframe(
+            pd.DataFrame(t["items"]), width="stretch", hide_index=True, column_order=("Item", "Give", "Each", "Total"),
+            column_config={"Give": st.column_config.NumberColumn(format="localized"),
+                           **{c: st.column_config.NumberColumn(format="compact") for c in ("Each", "Total")}},
+        )
+        st.markdown(f"[**Start trade with {name} →**]({TRADE_URL.format(id=t['trader_id'])}) · "
+                    f"[price list]({PAGE_URL.format(id=t['trader_id'])})")
+    if pulls:
+        st.markdown(f"**Pull from the market first** ({len(pulls)}): a trader pays more than these listings net.")
+        st.dataframe(
+            pd.DataFrame(pulls), width="stretch", hide_index=True,
+            column_order=("Item", "Amount", "Your price", "Trader pays", "Pull for"),
+            column_config={"Amount": st.column_config.NumberColumn(format="localized"),
+                           **{c: st.column_config.NumberColumn(format="compact") for c in ("Your price", "Trader pays")}},
+        )
+        st.markdown(f"[**Open your listings →**]({VIEW_LISTINGS_URL}) · pulled items go back to your inventory; "
+                    "**Run** again to add them to the trade.")
+    st.caption(
+        "Dump/Competitive items switch to **Trade** when a trader pays more than they'd net on the market after the "
+        f"{MARKET_FEE:.0%} tax and more than any shop (a trade has no tax). Start the trade on Torn and add the items "
+        "and amounts above; the trader accepts it. Weapon/armor copies stay on the market, since traders pay one price "
+        "whatever a copy rolled. Prices are re-read every 15 minutes."
+        + (" Couldn't refresh: " + "; ".join(errors) + "." if errors else "")
+    )
+    with st.expander(f"Traders ({len(traders)})"):
+        priced = {t["id"]: len((cache.get(str(t["id"])) or {}).get("prices") or {}) for t in traders}
+        edited_t = st.data_editor(
+            pd.DataFrame([{"Player ID": t["id"], "Name": t["name"], "Items priced": priced[t["id"]]} for t in traders]
+                         or [{"Player ID": None, "Name": None, "Items priced": None}]),
+            key="traders_editor", num_rows="dynamic", hide_index=True, width="stretch",
+            column_config={"Player ID": st.column_config.NumberColumn(format="%d", min_value=1, step=1),
+                           "Items priced": st.column_config.NumberColumn(disabled=True)},
+        )
+        new = [{"id": int(r["Player ID"]), "name": str(r.get("Name") or int(r["Player ID"]))}
+               for r in edited_t.to_dict("records") if pd.notna(r.get("Player ID"))]
+        if new != traders and st.button("Save traders", key="traders_save", type="primary"):
+            save_traders(new)
+            st.rerun()
+        st.caption("Any player with a weav3r.dev price list: their ID is the number in weav3r.dev/pricelist/<ID>.")
 
 
 ADD_LISTING_URL = "https://www.torn.com/page.php?sid=ItemMarket#/addListing"

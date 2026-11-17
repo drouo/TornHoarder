@@ -120,6 +120,12 @@ class ListModeDecisionsTest(unittest.TestCase):
         self.assertEqual(keep["hold"], "Keep")
         self.assertIn("sell at Pharmacy", shop["hold"])
 
+    def test_trade_items_are_never_listed(self):
+        entry = {"name": "Wolverine Plushie", "plan": "trade", "trader": "Shekels", "list": 4273, "qty": 354,
+                 "fast": 4300, "fair": 6667, "greedy": 7000}
+        (plush,) = self.run_cases([{"id": "261", "entry": entry, "rolls": None, "isCopy": False, "owned": 354}])
+        self.assertEqual(plush["hold"], "trade to Shekels instead (pays more)")
+
     def test_shop_item_no_shop_takes_lists_with_its_market_plan_without_shop_floor(self):
         (fin,) = self.run_cases([{"id": "1485", "entry": PRICE_MAP["1485"], "rolls": None, "isCopy": False, "owned": 3}])
         self.assertEqual((fin["price"], fin["qty"], fin["plan"]), (65999, 3, "competitive"))

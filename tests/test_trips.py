@@ -127,11 +127,13 @@ global.location = { pathname: "/index.php", search: "", hash: "", href: "" };
 global.Event = function () {};
 Date.now = () => page.now * 1000;
 global.document = {
-  createElement: () => el(), body: el({ dataset: {} }), documentElement: { scrollHeight: 0 },
+  createElement: () => el(), body: el({ dataset: page.dataset || {} }), documentElement: { scrollHeight: 0 },
   getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
   addEventListener() {}, createTextNode: t => ({ textContent: t, kids: [] }),
 };
+const flying = [];
 global.GM_xmlhttpRequest = o => {
+  if (o.method === "POST" && /\/flying$/.test(o.url)) flying.push(o.url);
   if (/travel-prices$/.test(o.url)) o.onload({ responseText: JSON.stringify({ checked: 1, sell: page.sell }) });
   else if (/restocks$/.test(o.url)) o.onload({ responseText: JSON.stringify({ restocks: page.restocks }) });
   else if (o.onload) o.onload({ responseText: "{}" });
@@ -142,7 +144,7 @@ global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const text = e => [e.textContent].concat((e.kids || []).map(text)).join("");
 const pill = made.find(e => e.id === "th-restock-badge");
-const out = { shown: pill.style.display !== "none", chip: text(pill), chimes, store };
+const out = { shown: pill.style.display !== "none", chip: text(pill), chimes, store, flying: flying.length };
 if (page.open || page.dismiss) pill.onclick({ target: {} });
 out.pill = text(pill);
 const link = (function find(e) { if (e.href) return e; for (const k of e.kids || []) { const f = find(k); if (f) return f; } return null; })(pill);
@@ -193,6 +195,12 @@ class RestockAlertJsTest(unittest.TestCase):
     def test_small_or_unpriced_restocks_stay_quiet(self):
         self.assertFalse(self.run_page(sell={"206": 801_000})["shown"])
         self.assertFalse(self.run_page(sell={})["shown"])
+
+    def test_in_the_air_the_app_is_told_once_to_check_prices_before_landing(self):
+        out = self.run_page(dataset={"traveling": "true"})
+        self.assertEqual(out["flying"], 1)
+        self.assertEqual(self.run_page(dataset={"traveling": "true"}, store=out["store"])["flying"], 0)
+        self.assertEqual(self.run_page(dataset={"traveling": "false"})["flying"], 0)
 
     def test_dismiss_hides_it(self):
         out = self.run_page(dismiss=True)

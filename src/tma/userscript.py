@@ -1782,6 +1782,28 @@ TEMPLATE = """\
         location.href = r.stops[r.i].url;
     }
 
+    // ---- In the air: the app checks the destination's prices before landing --
+    // At most once every FLYING_GAP_MS; the app asks Torn where to and when
+    // you land, and ignores flights home.
+    var FLYING_KEY = "tornhoarder.flyingSent";
+    var FLYING_GAP_MS = 2 * 60 * 1000;
+
+    function reportFlying() {
+        if (((document.body && document.body.dataset) || {}).traveling !== "true" || typeof GM_xmlhttpRequest === "undefined") {
+            return;
+        }
+        if (Date.now() - (Number(readPref(FLYING_KEY, "0")) || 0) < FLYING_GAP_MS) {
+            return;
+        }
+        writePref(FLYING_KEY, String(Date.now()));
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: CFG.reportUrl.replace(/shop-report$/, "flying"),
+            headers: { "Content-Type": "application/json" },
+            data: "{}"
+        });
+    }
+
     // ---- Tray: every notice in one stack, bottom left ------------------------
     // One line per kind (below minimum, city shops, restocks abroad, listings
     // to pull); clicking one opens it and closes the others, so they never
@@ -2966,6 +2988,7 @@ TEMPLATE = """\
     cityBadge();
     restockAlert();
     traySettings();
+    reportFlying();
     if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
         watchCityBuys();
     }

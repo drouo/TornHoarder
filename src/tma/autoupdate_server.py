@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import http.server
 import json
+import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from .foreign_stock import recent_restocks
@@ -63,10 +64,19 @@ def _append_log(script_path: Path, entry: dict) -> None:
         f.write(line + "\n")
 
 
+def app_log(script_path: Path, msg: str) -> None:
+    """A line from the app itself (not a Torn page) in the same log."""
+    try:
+        _append_log(script_path, {"ver": "app", "page": "app", "msg": "[TornHoarder] " + msg})
+    except OSError:
+        pass
+
+
 def _make_handler(
     script_path: Path, reports_path: Optional[Path], status_path: Optional[Path] = None,
     travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
     trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None, trade_path: Optional[Path] = None,
+    on_flying: Optional[Callable[[], None]] = None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     # JSON the app writes for the userscript to fetch, with what to serve before it exists.
     feeds = {
@@ -122,6 +132,12 @@ def _make_handler(
             self.wfile.write(content)
 
         def do_POST(self) -> None:  # noqa: N802 (stdlib method name)
+            if self.path == "/flying":  # the userscript sees you in the air: check prices before landing
+                if on_flying:
+                    threading.Thread(target=on_flying, daemon=True, name="tma-prelanding").start()
+                self.send_response(204)
+                self.end_headers()
+                return
             # /shop-report: a city shop's Sell page; /trip-buy: a buy abroad; /script-log: diagnostics.
             sinks = {"/shop-report": (reports_path, record_shop_report), "/trip-buy": (trips_path, record_buy),
                      "/script-log": (script_path, _append_log)}
@@ -151,7 +167,8 @@ def build_server(
     script_path: Path, port: int = DEFAULT_PORT, reports_path: Optional[Path] = None,
     status_path: Optional[Path] = None, travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
     trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None, trade_path: Optional[Path] = None,
+    on_flying: Optional[Callable[[], None]] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
     return http.server.HTTPServer(("127.0.0.1", port), _make_handler(
-        script_path, reports_path, status_path, travel_path, plan_path, trips_path, foreign_path, trade_path))
+        script_path, reports_path, status_path, travel_path, plan_path, trips_path, foreign_path, trade_path, on_flying))

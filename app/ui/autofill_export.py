@@ -11,13 +11,47 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from tma.autoupdate_server import DEFAULT_PORT, build_server
+from tma.autoupdate_server import DEFAULT_PORT, app_log, build_server
+from tma.config import load_api_key, load_traders
+from tma.http_client import BASE_URL, get_json_with_retry, session_for_requests, shared_bucket
+from tma.item_stats import load_profiles
+from tma.market_fetch import fetch_all_item_markets
+from tma.prelanding import PreLanding, check_destination
+from tma.traders import best_offers, refresh_prices
+from tma.travel_plan import load_history
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
 from tma.userscript import TEMPLATE_HASH, build_userscript, template_of
 
-from ..paths import (AUTOFILL_PATH, FOREIGN_STOCK_PATH, SHOP_BUYS_PATH, SHOP_PLAN_PATH, STOCK_STATUS_PATH,
-                     TRADE_PLAN_PATH, TRAVEL_PRICES_PATH, TRIP_BUYS_PATH, USERSCRIPT_INPUTS_PATH)
+from ..paths import (AUTOFILL_PATH, FOREIGN_STOCK_PATH, FOREIGN_UPDATES_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
+                     SHOP_PLAN_PATH, STOCK_STATUS_PATH, TRADE_PLAN_PATH, TRADER_PRICES_PATH, TRAVEL_PRICES_PATH,
+                     TRIP_BUYS_PATH, USERSCRIPT_INPUTS_PATH)
 from .stock_minimums import status_json
+
+
+def _prelanding() -> PreLanding:
+    """Checks the destination's prices a few minutes before you land abroad
+    (the userscript reports the flight); results go to the script log."""
+
+    def lookup():
+        key = load_api_key()
+        if not key:
+            return None, "no API key"
+        return get_json_with_retry(session_for_requests(), shared_bucket(), f"{BASE_URL}/user/travel", key,
+                                   timeout=15, retries=1)
+
+    def check(code: str) -> str:
+        session, key = session_for_requests(), load_api_key()
+        refs = {int(k): v.get("market_price") or 0 for k, v in load_profiles(PROFILES_PATH).items()}
+        traders = load_traders()
+        offers = best_offers(traders, refresh_prices(TRADER_PRICES_PATH, traders, session)[0])
+
+        def fetch(ids: list[int]) -> dict[int, dict]:
+            return fetch_all_item_markets(session, shared_bucket(), key, ids, {i: 0 for i in ids}, deadline_s=90)[0]
+
+        h = load_history(FOREIGN_STOCK_PATH, FOREIGN_UPDATES_PATH)
+        return check_destination(code, h, refs, offers, fetch, TRAVEL_PRICES_PATH)
+
+    return PreLanding(lookup, check, lambda msg: app_log(AUTOFILL_PATH, msg))
 
 
 @st.cache_resource
@@ -31,7 +65,8 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
     try:
         server = build_server(AUTOFILL_PATH, port=port, reports_path=SHOP_BUYS_PATH, status_path=STOCK_STATUS_PATH,
                               travel_path=TRAVEL_PRICES_PATH, plan_path=SHOP_PLAN_PATH,
-                              trips_path=TRIP_BUYS_PATH, foreign_path=FOREIGN_STOCK_PATH, trade_path=TRADE_PLAN_PATH)
+                              trips_path=TRIP_BUYS_PATH, foreign_path=FOREIGN_STOCK_PATH, trade_path=TRADE_PLAN_PATH,
+                              on_flying=_prelanding().flying)
     except OSError:
         # Port already bound — most likely this same server from a prior process
         # (e.g. `tools/update_server.py` run by hand), so the URL is still live.

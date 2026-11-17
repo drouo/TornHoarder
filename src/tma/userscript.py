@@ -3082,17 +3082,28 @@ TEMPLATE = """\
     // steps (each one is a page load).
     var TRADE_SKIP_KEY = "tornhoarder.tradeSkip";
 
+    // Types into a field and leaves it, as tabbing out would: Torn's older pages
+    // (trade) only enable their buttons on keyup/blur, not on input.
     function setText(el, value) {
         var proto = String(el.tagName || "").toUpperCase() === "TEXTAREA" && typeof HTMLTextAreaElement !== "undefined"
             ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
         var d = Object.getOwnPropertyDescriptor(proto, "value");
+        if (el.focus) {
+            el.focus();
+        }
         if (d && d.set) {
             d.set.call(el, String(value));
         } else {
             el.value = String(value);
         }
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        ["input", "keyup", "change"].forEach(function (t) {
+            el.dispatchEvent(new Event(t, { bubbles: true }));
+        });
+        if (el.blur) {
+            el.blur();
+        }
+        el.dispatchEvent(new Event("blur"));
+        el.dispatchEvent(new Event("focusout", { bubbles: true }));
     }
 
     function today() {
@@ -3120,9 +3131,7 @@ TEMPLATE = """\
         // Torn's "Start a trade" form: the INITIATE TRADE button, and the
         // description box next to the player box.
         function initiate() {
-            return Array.prototype.filter.call(document.querySelectorAll("input[type=submit], button"), function (b) {
-                return /initiate trade/i.test(b.value || b.textContent || "");
-            })[0] || null;
+            return buttonLabelled(/initiate trade/i);
         }
 
         function description(go) {
@@ -3132,6 +3141,101 @@ TEMPLATE = """\
 
         function picked(t) {
             return t.items.filter(function (i) { return !excluded[i.id]; });
+        }
+
+        var note = "";
+        var filled = 0;      // items whose amount was filled on this Add items page
+        var missing = [];    // picked items with no row there
+        var lastStep = "";
+
+        function buttonLabelled(re) {
+            return Array.prototype.filter.call(document.querySelectorAll("input[type=submit], button"), function (b) {
+                return re.test(b.value || b.textContent || "");
+            })[0] || null;
+        }
+
+        function addButton() {
+            return buttonLabelled(/^\\s*add to trade\\s*$/i);
+        }
+
+        // Which step Torn shows, from the page itself (the URL hash isn't always there).
+        function step() {
+            var st = initiate() ? "start"
+                : document.querySelector("input[name=amount]") ? "add"
+                    : hashParam("step") === "accept" || buttonLabelled(/please check your trade/i) ? "accept"
+                        : document.querySelector(".accept-trade-button") || hashParam("step") === "view" ? "view" : "other";
+            if (st !== lastStep) {
+                lastStep = st;
+                filled = 0;
+                missing = [];
+            }
+            return st;
+        }
+
+        function tradeId() {
+            var id = hashParam("ID");
+            if (id) {
+                return id;
+            }
+            var f = document.querySelector("form[action*='ID=']");
+            var m = f && /ID=(\\d+)/.exec(f.getAttribute("action") || "");
+            return m ? m[1] : "";
+        }
+
+        // Each step's markup once, so the next round can read amounts and money exactly.
+        var probedHtml = {};
+
+        function probeHtml(st) {
+            if (probedHtml[st] || st === "start" || st === "other") {
+                return;
+            }
+            probedHtml[st] = true;
+            var scope = document.querySelector(".content-wrapper") || document.body;
+            var html = st === "add"
+                ? Array.prototype.slice.call(document.querySelectorAll("input[name=amount]"), 0, 3).map(function (i) {
+                    var row = i.closest ? i.closest("li") || i.parentElement : i.parentElement;
+                    return (row && row.outerHTML) || "";
+                }).join(" || ")
+                : (scope.outerHTML || "");
+            thLog("[TornHoarder] trade html " + st + ": " + html.replace(/<script[\\s\\S]*?<\\/script>/gi, "")
+                .replace(/\\s+/g, " ").slice(0, 8000));
+        }
+
+        // Add items rows: the amount box, and the item by its image (/images/items/<id>/) or name.
+        function addRows() {
+            return Array.prototype.map.call(document.querySelectorAll("input[name=amount]"), function (input) {
+                var row = (input.closest && input.closest("li")) || input.parentElement;
+                if (!row) {
+                    return null;
+                }
+                var img = row.querySelector ? row.querySelector("img[src*='/images/items/']") : null;
+                var m = img && /items\\/(\\d+)\\//.exec(img.getAttribute("src") || "");
+                return { input: input, id: m ? Number(m[1]) : null, text: String(row.textContent || "").toLowerCase() };
+            }).filter(Boolean);
+        }
+
+        function fillAmounts(t) {
+            var rows = addRows();
+            filled = 0;
+            missing = [];
+            picked(t).forEach(function (i) {
+                var r = rows.filter(function (x) { return x.id === Number(i.id); })[0] ||
+                    rows.filter(function (x) { return x.id == null && x.text.indexOf(i.name.toLowerCase()) >= 0; })[0];
+                if (!r) {
+                    missing.push(i.name);
+                    return;
+                }
+                setText(r.input, i.qty);
+                filled += 1;
+            });
+            thLog("[TornHoarder] trade: filled " + filled + " of " + picked(t).length + " item(s) from " + rows.length +
+                " rows" + (missing.length ? "; not found: " + missing.join(", ") : ""));
+        }
+
+        // On the trade view: is the item on the page (your side lists it by name)?
+        function inTrade(i) {
+            var scope = document.querySelector(".content-wrapper") || document.body;
+            return String((scope && scope.textContent) || "").toLowerCase().indexOf(i.name.toLowerCase()) >= 0;
         }
 
         // The trade's later steps drop userID from the URL: remember who it's with.
@@ -3157,12 +3261,26 @@ TEMPLATE = """\
             var s = t.status || {};
             var sel = picked(t);
             var total = sel.reduce(function (n, i) { return n + i.qty * i.price; }, 0);
-            var go = initiate();
+            var st = step();
+            probeHtml(st);
             if (s.open === false) {
                 btn.textContent = "⛔ " + t.name + " can't trade now: " + s.status + " (click to close)";
-            } else if (go && !started) {
-                btn.textContent = sel.length ? "Start trade with " + t.name + ": " + sel.length + " item(s) · " + fmtMoney(total)
-                    : "Nothing selected to trade (click to close)";
+            } else if (!sel.length) {
+                btn.textContent = "Nothing selected to trade (click to close)";
+            } else if (st === "start") {
+                btn.textContent = started ? "Starting the trade…" + (note ? " — " + note : "")
+                    : "Start trade with " + t.name + ": " + sel.length + " item(s) · " + fmtMoney(total);
+            } else if (st === "add") {
+                btn.textContent = filled ? "Add to trade: " + filled + " item(s) filled — press ADD TO TRADE" +
+                    (missing.length ? " (not found: " + missing.join(", ") + ")" : "")
+                    : "Fill " + sel.length + " item(s) for " + t.name;
+            } else if (st === "view") {
+                var out = sel.filter(function (i) { return !inTrade(i); });
+                btn.textContent = out.length ? "Add " + out.length + " item(s) to the trade →"
+                    : "All " + sel.length + " item(s) are in: check the money from " + t.name + " (" + fmtMoney(total) +
+                        "), then Accept Trade on Torn's page (click to close)";
+            } else if (st === "accept") {
+                btn.textContent = "Check it's " + fmtMoney(total) + " from " + t.name + ", then ACCEPT on Torn's page (click to close)";
             } else {
                 btn.textContent = "Give " + t.name + " " + sel.length + " item(s) · " + fmtMoney(total) + " (click to close)";
             }
@@ -3203,23 +3321,55 @@ TEMPLATE = """\
             });
         }
 
-        // On the start page one click fills the description (today's date) and
-        // presses INITIATE TRADE; on later steps the button closes the panel.
+        // Start: fill the description (today's date), leave the box, then press
+        // INITIATE TRADE once Torn enables it. View: go to Add items. Add: click
+        // 1 fills each picked item's amount, click 2 presses ADD TO TRADE.
+        // Accepting stays on Torn's page: check the money first.
+        function pressWhenEnabled(go, tries) {
+            if (!go.disabled) {
+                go.click();
+                return;
+            }
+            if (tries <= 0) {
+                note = "Torn kept INITIATE TRADE disabled: press it on Torn's page";
+                thLog("[TornHoarder] trade: INITIATE TRADE still disabled after filling the description");
+                draw();
+                return;
+            }
+            setTimeout(function () { pressWhenEnabled(go, tries - 1); }, 200);
+        }
+
         btn.addEventListener("click", function () {
             var t = trader();
-            var go = initiate();
-            if (!t || !go || started || (t.status || {}).open === false || !picked(t).length) {
+            var st = step();
+            if (!t || (t.status || {}).open === false || !picked(t).length) {
                 dock.close();
                 return;
             }
-            var box = description(go);
-            if (box) {
-                setText(box, "Trade " + today());
+            if (st === "start" && !started) {
+                var go = initiate();
+                var box = description(go);
+                if (box) {
+                    setText(box, "Trade " + today());
+                }
+                thLog("[TornHoarder] trade: initiating with " + t.name + " (" + picked(t).length + " item(s))" +
+                    (box ? ", description filled" : ", no description box found") + (go.disabled ? ", waiting for INITIATE" : ""));
+                started = true;
+                pressWhenEnabled(go, 10);
+            } else if (st === "add" && !filled) {
+                fillAmounts(t);
+            } else if (st === "add") {
+                var add = addButton();
+                thLog("[TornHoarder] trade: ADD TO TRADE pressed with " + filled + " item(s)" + (add ? "" : " (button not found)"));
+                if (add) {
+                    add.click();
+                }
+            } else if (st === "view" && tradeId() && picked(t).some(function (i) { return !inTrade(i); })) {
+                location.hash = "#step=add&ID=" + tradeId();
+            } else {
+                dock.close();
+                return;
             }
-            thLog("[TornHoarder] trade: initiating with " + t.name + " (" + picked(t).length + " item(s))" +
-                (box ? ", description filled" : ", no description box found"));
-            started = true;
-            go.click();
             draw();
         });
         fetchTradePlan(function (p) {

@@ -43,11 +43,21 @@ const form = el({ querySelector: s => (/textarea/.test(s) ? desc : null) });
 const go = el({ tagName: "INPUT", type: "submit", value: "INITIATE TRADE", closest: s => (s === "form" ? form : null),
   click() { clicked.push("initiate"); } });
 Object.assign(store, page.store || {});
+// Torn's Add items page: one row per item you hold, an amount box each, ADD TO TRADE.
+const amounts = (page.addRows || []).map(r => {
+  const row = el({ tagName: "LI", textContent: r.name + " x" + r.have,
+    querySelector: s => (/img/.test(s) && r.id ? el({ getAttribute: () => "/images/items/" + r.id + "/medium.png" }) : null) });
+  return el({ tagName: "INPUT", name: "amount", value: "", closest: s => (s === "li" ? row : null), forItem: r.name });
+});
+const addBtn = el({ tagName: "INPUT", type: "submit", value: "ADD TO TRADE", click() { clicked.push("add"); } });
+const acceptBtn = el({ className: "accept-trade-button" });
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
-  body: el({ dataset: { abroad: "false", traveling: "false" }, textContent: "" }),
-  getElementById: () => null, querySelector: () => null,
-  querySelectorAll: s => (/^input\[type=submit\], button$/.test(s) ? (page.start ? [go] : [])
+  body: el({ dataset: { abroad: "false", traveling: "false" }, textContent: page.bodyText || "" }),
+  getElementById: () => null,
+  querySelector: s => (s === "input[name=amount]" ? amounts[0] || null : s === ".accept-trade-button" && page.view ? acceptBtn : null),
+  querySelectorAll: s => (/^input\[type=submit\], button$/.test(s) ? (page.start ? [go] : page.addRows ? [addBtn] : [])
+    : s === "input[name=amount]" ? amounts
     : /button, a, input/.test(s) ? [addItems] : []),
   createTextNode: t => ({ textContent: t, kids: [] }), addEventListener() {},
 };
@@ -64,9 +74,10 @@ const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
 const btn = made.find(e => e.id === "th-trade-btn");
 if (page.skip) made.find(e => e.textContent && e.textContent.indexOf("✓ " + page.skip) === 0).onclick();
 const before = btn ? btn.textContent : null;
-if (page.click) btn.onclick();
+for (let i = 0; i < (page.click === true ? 1 : page.click || 0); i++) btn.onclick();
 const pill = made.find(e => e.id === "th-pull");
-process.stdout.write(JSON.stringify({ before, clicked, desc: desc.value, skips: store["tornhoarder.tradeSkip"] || null,
+process.stdout.write(JSON.stringify({ before, clicked, desc: desc.value, hash: location.hash,
+  amounts: Object.fromEntries(amounts.map(a => [a.forItem, a.value])), skips: store["tornhoarder.tradeSkip"] || null,
   button: btn ? btn.textContent : null, panel: made.map(text).join("\n"),
   pill: pill ? text(pill) : null, logs, tradeWith: store["tornhoarder.tradeWith"] || null }));
 """
@@ -110,6 +121,28 @@ class TradeJsTest(unittest.TestCase):
         self.assertEqual(out["clicked"], ["initiate"])
         self.assertRegex(out["desc"], r"^Trade \d{4}-\d{2}-\d{2}$")
         self.assertTrue(any("initiating with Shekels (1 item(s)), description filled" in m for m in out["logs"]), out["logs"])
+
+    def test_add_items_fills_picked_amounts_then_adds_to_trade(self):
+        plan = json.loads(json.dumps(PLAN))
+        plan["traders"][0]["items"] += [{"id": 618, "name": "Stingray Plushie", "qty": 54, "price": 4990.0},
+                                        {"id": 1485, "name": "Shark Fin", "qty": 30, "price": 64457.0}]
+        rows = [{"id": 261, "name": "Wolverine Plushie", "have": 400}, {"name": "Stingray Plushie", "have": 60},
+                {"id": 206, "name": "Xanax", "have": 3}]
+        out = self.run_page(path="/trade.php", hash="#step=add&ID=13897881", plan=plan, addRows=rows,
+                            store={"tornhoarder.tradeWith": "3878831"}, click=2)
+        self.assertEqual(out["before"], "Fill 3 item(s) for Shekels")
+        self.assertEqual(out["amounts"], {"Wolverine Plushie": "354", "Stingray Plushie": "54", "Xanax": ""})
+        self.assertEqual(out["clicked"], ["add"])
+        self.assertTrue(any("filled 2 of 3 item(s) from 3 rows; not found: Shark Fin" in m for m in out["logs"]), out["logs"])
+
+    def test_trade_view_sends_you_to_add_whats_missing(self):
+        out = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, click=True,
+                            store={"tornhoarder.tradeWith": "3878831"})
+        self.assertEqual(out["before"], "Add 1 item(s) to the trade →")
+        self.assertEqual(out["hash"], "#step=add&ID=13897881")
+        done = self.run_page(path="/trade.php", hash="#step=view&ID=13897881", view=True, bodyText="Wolverine Plushie x354",
+                             store={"tornhoarder.tradeWith": "3878831"})
+        self.assertTrue(done["button"].startswith("All 1 item(s) are in: check the money from Shekels ($1,512,642)"), done["button"])
 
     def test_left_out_items_drop_from_the_trade_and_stay_out(self):
         plan = json.loads(json.dumps(PLAN))

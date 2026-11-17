@@ -36,11 +36,19 @@ global.location = { pathname: page.path, search: page.search || "", hash: page.h
 global.Event = function () {};
 global.HTMLInputElement = { prototype: {} };
 const addItems = el({ tagName: "A", textContent: "Add items" });
+// Torn's "Start a trade" form: player box, description, INITIATE TRADE.
+const clicked = [];
+const desc = el({ tagName: "TEXTAREA", value: "" });
+const form = el({ querySelector: s => (/textarea/.test(s) ? desc : null) });
+const go = el({ tagName: "INPUT", type: "submit", value: "INITIATE TRADE", closest: s => (s === "form" ? form : null),
+  click() { clicked.push("initiate"); } });
+Object.assign(store, page.store || {});
 global.document = {
   createElement: () => el(), documentElement: { scrollHeight: 0 },
   body: el({ dataset: { abroad: "false", traveling: "false" }, textContent: "" }),
   getElementById: () => null, querySelector: () => null,
-  querySelectorAll: s => (/button, a, input/.test(s) ? [addItems] : []),
+  querySelectorAll: s => (/^input\[type=submit\], button$/.test(s) ? (page.start ? [go] : [])
+    : /button, a, input/.test(s) ? [addItems] : []),
   createTextNode: t => ({ textContent: t, kids: [] }), addEventListener() {},
 };
 const logs = [];
@@ -54,8 +62,12 @@ global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
 const btn = made.find(e => e.id === "th-trade-btn");
+if (page.skip) made.find(e => e.textContent && e.textContent.indexOf("✓ " + page.skip) === 0).onclick();
+const before = btn ? btn.textContent : null;
+if (page.click) btn.onclick();
 const pill = made.find(e => e.id === "th-pull");
-process.stdout.write(JSON.stringify({ button: btn ? btn.textContent : null, panel: made.map(text).join("\n"),
+process.stdout.write(JSON.stringify({ before, clicked, desc: desc.value, skips: store["tornhoarder.tradeSkip"] || null,
+  button: btn ? btn.textContent : null, panel: made.map(text).join("\n"),
   pill: pill ? text(pill) : null, logs, tradeWith: store["tornhoarder.tradeWith"] || null }));
 """
 
@@ -80,7 +92,7 @@ class TradeJsTest(unittest.TestCase):
     def test_trade_page_lists_what_to_give_and_logs_its_layout(self):
         out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831")
         self.assertEqual(out["button"], "Give Shekels 1 item(s) · $1,512,642 (click to close)")
-        self.assertIn("· 354 × Wolverine Plushie at $4,273 = $1,512,642", out["panel"])
+        self.assertIn("✓ 354 × Wolverine Plushie at $4,273 = $1,512,642", out["panel"])
         self.assertEqual(out["tradeWith"], "3878831")
         self.assertTrue(any(m.startswith("[TornHoarder] layout trade start: <a> Add items") for m in out["logs"]), out["logs"])
 
@@ -91,6 +103,29 @@ class TradeJsTest(unittest.TestCase):
         self.assertEqual(out["button"], "⛔ Shekels can't trade now: Traveling to Mexico (click to close)")
         self.assertIn("Shekels can't accept a trade while traveling to Mexico (last action Online)", out["panel"])
         self.assertIn("[TornHoarder] trade: Shekels unavailable: Traveling to Mexico", out["logs"])
+
+    def test_one_click_on_the_start_page_fills_the_date_and_initiates(self):
+        out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", start=True, click=True)
+        self.assertEqual(out["before"], "Start trade with Shekels: 1 item(s) · $1,512,642")
+        self.assertEqual(out["clicked"], ["initiate"])
+        self.assertRegex(out["desc"], r"^Trade \d{4}-\d{2}-\d{2}$")
+        self.assertTrue(any("initiating with Shekels (1 item(s)), description filled" in m for m in out["logs"]), out["logs"])
+
+    def test_left_out_items_drop_from_the_trade_and_stay_out(self):
+        plan = json.loads(json.dumps(PLAN))
+        plan["traders"][0]["items"].append({"id": 618, "name": "Stingray Plushie", "qty": 54, "price": 4990.0})
+        out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", plan=plan, start=True, skip="354")
+        self.assertEqual(out["button"], "Start trade with Shekels: 1 item(s) · $269,460")
+        self.assertEqual(json.loads(out["skips"]), {"261": True})
+        again = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", plan=plan, start=True,
+                              store={"tornhoarder.tradeSkip": out["skips"]})
+        self.assertIn("✕ 354 × Wolverine Plushie", again["panel"])
+
+    def test_nothing_selected_never_initiates(self):
+        out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", start=True, click=True,
+                            store={"tornhoarder.tradeSkip": '{"261": true}'})
+        self.assertEqual(out["before"], "Nothing selected to trade (click to close)")
+        self.assertEqual(out["clicked"], [])
 
     def test_other_players_trades_have_nothing_planned(self):
         out = self.run_page(path="/trade.php", hash="#step=start&userID=1")

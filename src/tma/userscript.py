@@ -3055,8 +3055,10 @@ TEMPLATE = """\
             return;
         }
         probedLayouts[what] = true;
-        var controls = Array.prototype.map.call(document.querySelectorAll("button, a, input, select, [role=button]"), function (b) {
-            if (b.offsetParent === null || (b.closest && b.closest("#th-dock, #th-pull"))) {
+        // The page's own content only: Torn's header and sidebar links crowd out the form otherwise.
+        var scope = document.querySelector(".content-wrapper") || document;
+        var controls = Array.prototype.map.call(scope.querySelectorAll("button, a, input, select, textarea, [role=button]"), function (b) {
+            if (b.offsetParent === null || (b.closest && b.closest("#th-dock, #th-tray"))) {
                 return "";
             }
             var t = (b.textContent || b.value || "").trim().slice(0, 40);
@@ -3064,12 +3066,38 @@ TEMPLATE = """\
                 (b.name ? " name=" + b.name : "") + (b.className ? " class=" + String(b.className).slice(0, 60) : "") + ">" +
                 (t ? " " + t : "");
         }).filter(Boolean).slice(0, 150);
-        thLog("[TornHoarder] layout " + what + ": " + controls.join(" | "));
+        var forms = Array.prototype.map.call(scope.querySelectorAll("form"), function (f) {
+            return (f.outerHTML || "").replace(/\\s+/g, " ").slice(0, 4000);
+        });
+        thLog("[TornHoarder] layout " + what + ": " + controls.join(" | ") +
+            (forms.length ? " || forms: " + forms.join(" || ") : ""));
     }
 
     function hashParam(key) {
         var m = new RegExp("[#&?]" + key + "=([^&]*)").exec(location.hash || "");
         return m ? decodeURIComponent(m[1]) : "";
+    }
+
+    // Which planned items to leave out of the trade; kept across Torn's trade
+    // steps (each one is a page load).
+    var TRADE_SKIP_KEY = "tornhoarder.tradeSkip";
+
+    function setText(el, value) {
+        var proto = String(el.tagName || "").toUpperCase() === "TEXTAREA" && typeof HTMLTextAreaElement !== "undefined"
+            ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        var d = Object.getOwnPropertyDescriptor(proto, "value");
+        if (d && d.set) {
+            d.set.call(el, String(value));
+        } else {
+            el.value = String(value);
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function today() {
+        var d = new Date(Date.now());
+        return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
     }
 
     function tradeMode() {
@@ -3078,6 +3106,33 @@ TEMPLATE = """\
         var dock = makeDock(btn, panel);
         var plan = { traders: [] };
         var statusLogged = false;
+        var excluded = {};
+        try {
+            excluded = JSON.parse(readPref(TRADE_SKIP_KEY, "{}")) || {};
+        } catch (e) { /* none skipped */ }
+        var panelSig = "";
+        var started = false;
+
+        function saveSkips() {
+            writePref(TRADE_SKIP_KEY, JSON.stringify(excluded));
+        }
+
+        // Torn's "Start a trade" form: the INITIATE TRADE button, and the
+        // description box next to the player box.
+        function initiate() {
+            return Array.prototype.filter.call(document.querySelectorAll("input[type=submit], button"), function (b) {
+                return /initiate trade/i.test(b.value || b.textContent || "");
+            })[0] || null;
+        }
+
+        function description(go) {
+            var form = go.closest ? go.closest("form") : null;
+            return form ? form.querySelector("textarea, input[type=text]:not([name=userID])") : null;
+        }
+
+        function picked(t) {
+            return t.items.filter(function (i) { return !excluded[i.id]; });
+        }
 
         // The trade's later steps drop userID from the URL: remember who it's with.
         function trader() {
@@ -3100,27 +3155,73 @@ TEMPLATE = """\
                 return;
             }
             var s = t.status || {};
+            var sel = picked(t);
+            var total = sel.reduce(function (n, i) { return n + i.qty * i.price; }, 0);
+            var go = initiate();
             if (s.open === false) {
                 btn.textContent = "⛔ " + t.name + " can't trade now: " + s.status + " (click to close)";
+            } else if (go && !started) {
+                btn.textContent = sel.length ? "Start trade with " + t.name + ": " + sel.length + " item(s) · " + fmtMoney(total)
+                    : "Nothing selected to trade (click to close)";
             } else {
-                btn.textContent = "Give " + t.name + " " + t.items.length + " item(s) · " + fmtMoney(t.total) + " (click to close)";
+                btn.textContent = "Give " + t.name + " " + sel.length + " item(s) · " + fmtMoney(total) + " (click to close)";
             }
             var head = s.open === false
                 ? t.name + " can't accept a trade while " + s.status.charAt(0).toLowerCase() + s.status.slice(1) +
                     (s.last ? " (last action " + s.last + ")" : "") + ". Hold these for when they're back:"
-                : "Add these to the trade with Torn's Add items, then " + t.name + " accepts:";
+                : "Trade to " + t.name + " (" + sel.length + " of " + t.items.length + " items, " + fmtMoney(total) +
+                    "). Click a line to leave it out:";
             if (s.open === false && !statusLogged) {
                 statusLogged = true;
                 thLog("[TornHoarder] trade: " + t.name + " unavailable: " + s.status);
             }
-            setLines(panel, [head].concat(
-                t.items.map(function (i) {
-                    return "· " + Number(i.qty).toLocaleString("en-US") + " × " + i.name + " at " + fmtMoney(i.price) +
-                        " = " + fmtMoney(i.qty * i.price);
-                })));
+            var sig = head + "|" + t.items.map(function (i) { return i.id + ":" + !!excluded[i.id]; }).join(",");
+            if (sig === panelSig) {
+                return;
+            }
+            panelSig = sig;
+            panel.textContent = "";
+            var h = document.createElement("div");
+            h.textContent = head;
+            h.style.cssText = "color:#9ccc65;margin-bottom:4px;";
+            panel.appendChild(h);
+            selectLinks(panel, excluded, t.items.map(function (i) { return i.id; }), function () {
+                saveSkips();
+                draw();
+            });
+            t.items.forEach(function (i) {
+                var line = document.createElement("div");
+                line.textContent = (excluded[i.id] ? "✕ " : "✓ ") + Number(i.qty).toLocaleString("en-US") + " × " + i.name +
+                    " at " + fmtMoney(i.price) + " = " + fmtMoney(i.qty * i.price);
+                line.style.cssText = "cursor:pointer;" + (excluded[i.id] ? "text-decoration:line-through;color:#888;" : "");
+                line.addEventListener("click", function () {
+                    excluded[i.id] = !excluded[i.id];
+                    saveSkips();
+                    draw();
+                });
+                panel.appendChild(line);
+            });
         }
 
-        btn.addEventListener("click", function () { dock.close(); });
+        // On the start page one click fills the description (today's date) and
+        // presses INITIATE TRADE; on later steps the button closes the panel.
+        btn.addEventListener("click", function () {
+            var t = trader();
+            var go = initiate();
+            if (!t || !go || started || (t.status || {}).open === false || !picked(t).length) {
+                dock.close();
+                return;
+            }
+            var box = description(go);
+            if (box) {
+                setText(box, "Trade " + today());
+            }
+            thLog("[TornHoarder] trade: initiating with " + t.name + " (" + picked(t).length + " item(s))" +
+                (box ? ", description filled" : ", no description box found"));
+            started = true;
+            go.click();
+            draw();
+        });
         fetchTradePlan(function (p) {
             plan = p;
             draw();

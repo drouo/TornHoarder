@@ -38,6 +38,7 @@ from tma.sell_plan import (
     reserve_for,
 )
 from tma.shops import build_shop_run, load_shop_knowledge, shop_price_for
+from tma import traders as trader_feed
 from tma.traders import PAGE_URL, TRADE_URL, best_offers, refresh_prices, write_trade_plan
 
 from .. import paths
@@ -539,11 +540,33 @@ def flag_trade_listings(rows: list[dict], offers: dict[int, dict]) -> list[dict]
     return out
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _trader_status(api_key: str, trader_id: int) -> dict:
+    """Whether they can take a trade now; re-read at most once a minute."""
+    got, err = trader_feed.fetch_status(session_for_requests(), api_key, trader_id)
+    return dict(got, error=err)
+
+
+def _status_line(name: str, s: dict) -> str:
+    last = f" · last action {s['last']}" if s.get("last") else ""
+    if s.get("open") is None:
+        return f"❔ Couldn't read {name}'s status ({s.get('error') or 'no API key'}): check their profile before trading."
+    if not s["open"]:
+        return (f"⛔ **{name} can't trade right now: {s['status']}**{last}. Hold these items for the trade; "
+                "don't quick-sell them.")
+    return f"✅ {name} is {s['status']}{last}."
+
+
 def _render_trade_run(edited: pd.DataFrame, traders: list[dict], cache: dict, errors: list[str], listings: list[dict]) -> None:
     names = {t["id"]: t["name"] for t in traders}
     runs = trade_rows(edited)
     pulls = [r for r in listings if r.get("Pull for")]
-    write_trade_plan(paths.TRADE_PLAN_PATH, runs, pulls, names)  # for the script on Torn's trade/listings pages
+    api_key = st.session_state.get("api_key") or ""
+    status = {t["trader_id"]: (_trader_status(api_key, t["trader_id"]) if api_key
+                               else {"open": None, "status": "status unknown", "last": "", "error": None})
+              for t in runs}
+    # for the script on Torn's trade/listings pages
+    write_trade_plan(paths.TRADE_PLAN_PATH, runs, pulls, names, status)
     if not runs and not pulls:
         st.caption("No trader pays more than a quick sale for anything you're selling.")
     for t in runs:
@@ -552,6 +575,7 @@ def _render_trade_run(edited: pd.DataFrame, traders: list[dict], cache: dict, er
             f"**Trade to {name}**: {sum(i['Give'] for i in t['items']):,} items · {money(t['total'])}, no tax"
             .replace("$", "\\$")
         )
+        st.markdown(_status_line(name, status[t["trader_id"]]).replace("$", "\\$"))
         st.dataframe(
             pd.DataFrame(t["items"]), width="stretch", hide_index=True, column_order=("Item", "Give", "Each", "Total"),
             column_config={"Give": st.column_config.NumberColumn(format="localized"),

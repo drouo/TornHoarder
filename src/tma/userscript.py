@@ -3077,6 +3077,7 @@ TEMPLATE = """\
         var panel = infoPanel();
         var dock = makeDock(btn, panel);
         var plan = { traders: [] };
+        var statusLogged = false;
 
         // The trade's later steps drop userID from the URL: remember who it's with.
         function trader() {
@@ -3098,8 +3099,21 @@ TEMPLATE = """\
                 setLines(panel, ["The app's Sell plan lists what each of your traders pays more for than a quick sale."]);
                 return;
             }
-            btn.textContent = "Give " + t.name + " " + t.items.length + " item(s) · " + fmtMoney(t.total) + " (click to close)";
-            setLines(panel, ["Add these to the trade with Torn's Add items, then " + t.name + " accepts:"].concat(
+            var s = t.status || {};
+            if (s.open === false) {
+                btn.textContent = "⛔ " + t.name + " can't trade now: " + s.status + " (click to close)";
+            } else {
+                btn.textContent = "Give " + t.name + " " + t.items.length + " item(s) · " + fmtMoney(t.total) + " (click to close)";
+            }
+            var head = s.open === false
+                ? t.name + " can't accept a trade while " + s.status.charAt(0).toLowerCase() + s.status.slice(1) +
+                    (s.last ? " (last action " + s.last + ")" : "") + ". Hold these for when they're back:"
+                : "Add these to the trade with Torn's Add items, then " + t.name + " accepts:";
+            if (s.open === false && !statusLogged) {
+                statusLogged = true;
+                thLog("[TornHoarder] trade: " + t.name + " unavailable: " + s.status);
+            }
+            setLines(panel, [head].concat(
                 t.items.map(function (i) {
                     return "· " + Number(i.qty).toLocaleString("en-US") + " × " + i.name + " at " + fmtMoney(i.price) +
                         " = " + fmtMoney(i.qty * i.price);

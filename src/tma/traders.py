@@ -3,7 +3,9 @@ weav3r.dev price list). A trade has no market tax, so whenever a trader pays
 more than a quick sale nets, the item goes to the trader instead.
 
 Prices come from weav3r.dev's public JSON (`/api/pricelist/<player id>`):
-one row per item, buyPrice 0 when they don't buy it."""
+one row per item, buyPrice 0 when they don't buy it. Whether a trader can
+take a trade now comes from their Torn profile (user/<id>/profile): nobody
+accepts while flying, abroad, in hospital or in jail."""
 
 from __future__ import annotations
 
@@ -14,11 +16,14 @@ from typing import Optional
 
 import requests
 
+from .http_client import BASE_URL, get_json_with_retry
+
 PRICELIST_URL = "https://weav3r.dev/api/pricelist/{id}"
 PAGE_URL = "https://weav3r.dev/pricelist/{id}"
 TRADE_URL = "https://www.torn.com/trade.php#step=start&userID={id}"
 DEFAULT_TRADERS = ({"id": 3878831, "name": "Shekels"},)
 MAX_AGE_S = 15 * 60  # traders re-price often: refetch after this
+AWAY = ("Traveling", "Abroad", "Hospital", "Jail", "Federal")  # Torn status states that can't trade
 
 
 def parse_pricelist(rows) -> dict[int, float]:
@@ -41,6 +46,27 @@ def fetch_pricelist(session: requests.Session, trader_id: int) -> tuple[dict[int
         return parse_pricelist(resp.json()), None
     except (requests.RequestException, ValueError) as exc:
         return {}, f"{type(exc).__name__}: {exc}"
+
+
+def availability(profile: Optional[dict]) -> dict:
+    """{"open", "status", "last"}: open is False while their Torn status is one
+    of AWAY; None when the profile couldn't be read."""
+    if not profile:
+        return {"open": None, "status": "status unknown", "last": ""}
+    status = profile.get("status") or {}
+    last = profile.get("last_action") or {}
+    state = status.get("state") or ""
+    return {
+        "open": state not in AWAY,
+        "status": status.get("description") or state or "Okay",
+        "last": last.get("status") if last.get("status") == "Online" else (last.get("relative") or last.get("status") or ""),
+    }
+
+
+def fetch_status(session: requests.Session, api_key: str, trader_id: int) -> tuple[dict, Optional[str]]:
+    data, err = get_json_with_retry(session, None, f"{BASE_URL}/user/{int(trader_id)}/profile", api_key,
+                                    timeout=15, retries=1)
+    return availability((data or {}).get("profile")), err
 
 
 def load_prices(path: Path) -> dict:
@@ -84,13 +110,17 @@ def best_offers(traders, cache: dict) -> dict[int, dict]:
     return best
 
 
-def write_trade_plan(path: Path, runs: list[dict], pulls: list[dict], names: dict[int, str]) -> dict:
+def write_trade_plan(path: Path, runs: list[dict], pulls: list[dict], names: dict[int, str],
+                     status: Optional[dict[int, dict]] = None) -> dict:
     """What the userscript shows on Torn's trade and listings pages (/trade-plan):
-    per trader the items to give, and the market listings to pull first."""
+    per trader the items to give and whether they can trade now, and the market
+    listings to pull first."""
+    status = status or {}
     plan = {
         "checked": int(time.time()),
         "traders": [{
             "id": t["trader_id"], "name": names.get(t["trader_id"], str(t["trader_id"])), "total": t["total"],
+            "status": status.get(t["trader_id"]),
             "items": [{"id": i["item_id"], "name": i["Item"], "qty": i["Give"], "price": i["Each"]} for i in t["items"]],
         } for t in runs],
         "pull": [{"id": r.get("item_id"), "name": r.get("Item"), "amount": r.get("Amount"), "price": r.get("Your price"),

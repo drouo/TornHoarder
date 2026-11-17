@@ -55,6 +55,7 @@ def no_catalog_refresh(monkeypatch):
     from tma import traders
 
     monkeypatch.setattr(traders, "fetch_pricelist", lambda *a, **k: ({}, "not fetched in tests"))
+    monkeypatch.setattr(traders, "fetch_status", lambda *a, **k: (traders.availability(None), "not fetched in tests"))
 
     from tma import profile
 

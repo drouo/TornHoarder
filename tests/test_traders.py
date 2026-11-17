@@ -47,6 +47,26 @@ class TradersTest(unittest.TestCase):
         self.assertEqual(best[261], {"price": 4300.0, "trader_id": 42, "trader": "Other"})
         self.assertEqual(best[1]["trader"], "Shekels")
 
+    def test_availability_from_their_torn_profile(self):
+        # The shape of Torn v2 user/<id>/profile.
+        flying = {"status": {"description": "Traveling to Mexico", "state": "Traveling"},
+                  "last_action": {"status": "Online", "relative": "0 minutes ago"}}
+        self.assertEqual(traders.availability(flying), {"open": False, "status": "Traveling to Mexico", "last": "Online"})
+        home = {"status": {"description": "Okay", "state": "Okay"},
+                "last_action": {"status": "Offline", "relative": "3 hours ago"}}
+        self.assertEqual(traders.availability(home), {"open": True, "status": "Okay", "last": "3 hours ago"})
+        for state in ("Abroad", "Hospital", "Jail"):
+            self.assertFalse(traders.availability({"status": {"state": state}})["open"], state)
+        self.assertIsNone(traders.availability(None)["open"])
+
+    def test_trade_plan_carries_each_traders_status(self):
+        with TemporaryDirectory() as d:
+            runs = [{"trader_id": 3878831, "total": 10.0, "items": [{"item_id": 261, "Item": "Wolverine Plushie",
+                                                                       "Give": 1, "Each": 10.0}]}]
+            s = {"open": False, "status": "In Mexico", "last": "Online"}
+            plan = traders.write_trade_plan(Path(d) / "p.json", runs, [], {3878831: "Shekels"}, {3878831: s})
+        self.assertEqual(plan["traders"][0]["status"], s)
+
     def test_traders_default_to_shekels_and_save(self):
         self.assertEqual(load_traders(), [A])
         save_traders([A, B])

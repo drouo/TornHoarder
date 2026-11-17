@@ -84,6 +84,14 @@ class TradeJsTest(unittest.TestCase):
         self.assertEqual(out["tradeWith"], "3878831")
         self.assertTrue(any(m.startswith("[TornHoarder] layout trade start: <a> Add items") for m in out["logs"]), out["logs"])
 
+    def test_a_trader_who_cant_trade_now_is_flagged_and_logged(self):
+        plan = json.loads(json.dumps(PLAN))
+        plan["traders"][0]["status"] = {"open": False, "status": "Traveling to Mexico", "last": "Online"}
+        out = self.run_page(path="/trade.php", hash="#step=start&userID=3878831", plan=plan)
+        self.assertEqual(out["button"], "⛔ Shekels can't trade now: Traveling to Mexico (click to close)")
+        self.assertIn("Shekels can't accept a trade while traveling to Mexico (last action Online)", out["panel"])
+        self.assertIn("[TornHoarder] trade: Shekels unavailable: Traveling to Mexico", out["logs"])
+
     def test_other_players_trades_have_nothing_planned(self):
         out = self.run_page(path="/trade.php", hash="#step=start&userID=1")
         self.assertTrue(out["button"].startswith("Trade: nothing planned"))

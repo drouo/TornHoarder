@@ -105,6 +105,7 @@ Some players buy items outright at posted prices on [weav3r.dev](https://weav3r.
 
 - **Never quick-sell what a trader pays more for.** A Dump or Competitive item switches to **Trade** when the best trader's price beats its after-tax market net and any shop; a trade has no tax. Top dollar listings and weapon/armor copies stay on the market (traders pay one price whatever a copy rolled).
 - **Trade to <trader>** lists what to give each trader and the payout, with **Start trade with <trader> →** (Torn's trade page with that player).
+- **Can they trade now?** Under each Trade to <trader>, their Torn status from your API key (`user/<ID>/profile`, re-read at most once a minute): ✅ with their last action, or ⛔ while they're traveling, abroad, in hospital or in jail, when nobody can accept a trade. The items stay on Trade either way: hold them until the trader is back rather than quick-selling. The userscript says the same on Torn's trade page.
 - **Pull from the market first** lists your Item Market listings a trader pays more for than they'd net. Pull them on Torn, then Run again so they join the trade.
 - On Torn, the userscript shows the same lists on the trade page and on your listings. Those pages haven't been seen live yet, so each one's layout is written once to `data/tornhoarder.log.jsonl`; filling the trade's amounts comes after that.
 

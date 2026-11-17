@@ -2507,18 +2507,67 @@ TEMPLATE = """\
                 .sort(function (a, b) { return b.profit - a.profit; });
         }
 
+        // The most profitable load for the slots and cash left: buying the top
+        // item first can spend the cash and leave slots empty that a cheaper
+        // item would have filled (1 Bear Gall + 17 Hockey Sticks beats 2 Bear
+        // Galls on $60k). Branch and bound over counts, best items first.
+        var NODE_LIMIT = 200000;
+
+        function bestLoad(all, left, cash) {
+            var items = all.filter(function (r) { return r.stock > 0; }).slice(0, 8);
+            var best = { profit: 0, qty: [] };
+            var qty = [];
+            var nodes = 0;
+            (function go(i, slots, money, profit) {
+                if (profit > best.profit) {
+                    best = { profit: profit, qty: qty.slice() };
+                }
+                if (i >= items.length || slots <= 0 || ++nodes > NODE_LIMIT ||
+                    profit + slots * items[i].profit <= best.profit) {
+                    return;
+                }
+                var r = items[i];
+                for (var n = Math.min(r.stock, slots, Math.floor(money / r.cost)); n >= 0; n--) {
+                    qty[i] = n;
+                    go(i + 1, slots - n, money - n * r.cost, profit + n * r.profit);
+                }
+                qty[i] = 0;
+            })(0, left, cash, 0);
+            return items.map(function (r, i) { return { row: r, qty: best.qty[i] || 0 }; })
+                .filter(function (p) { return p.qty > 0; });
+        }
+
+        function greedyProfit(all, left, cash) {
+            var profit = 0;
+            all.forEach(function (r) {
+                var n = Math.max(0, Math.min(r.stock, left, Math.floor(cash / r.cost)));
+                profit += n * r.profit;
+                left -= n;
+                cash -= n * r.cost;
+            });
+            return profit;
+        }
+
+        var loggedPlan = "";
+
         function next(all) {
             var cap = capacity();
             var left = cap ? cap.max - cap.bought : 0;
             var wallet = walletNow();
-            for (var i = 0; i < all.length; i++) {
-                var r = all[i];
-                var qty = Math.min(r.stock, left, wallet ? Math.floor(wallet / r.cost) : left);
-                if (qty > 0) {
-                    return { row: r, qty: qty };
-                }
+            var cash = wallet ? wallet : Infinity;
+            var load = left > 0 ? bestLoad(all, left, cash) : [];
+            if (!load.length) {
+                return null;
             }
-            return null;
+            var desc = load.map(function (p) { return p.qty + " x " + p.row.name; }).join(" + ");
+            if (desc !== loggedPlan) {
+                loggedPlan = desc;
+                var profit = load.reduce(function (s, p) { return s + p.qty * p.row.profit; }, 0);
+                thLog("[TornHoarder] abroad: plan " + desc + " = +" + fmtMoney(profit) + " for " + left +
+                    " slot(s) and " + (wallet ? fmtMoney(wallet) : "unknown cash") +
+                    "; most profitable first would make +" + fmtMoney(greedyProfit(all, left, cash)));
+            }
+            return { row: load[0].row, qty: load[0].qty, then: load.slice(1) };
         }
 
         // Done buying: the button flies home. Click 1 presses Torn's own
@@ -2748,7 +2797,8 @@ TEMPLATE = """\
                 logConfirm();
             } else if (n) {
                 btn.textContent = "Buy " + n.qty + " × " + n.row.name + " · " + fmtMoney(n.qty * n.row.cost) +
-                    " (+" + fmtMoney(n.qty * n.row.profit) + ")";
+                    " (+" + fmtMoney(n.qty * n.row.profit) + ")" + (n.then.length ? " · then " +
+                        n.then.map(function (p) { return p.qty + " × " + p.row.name; }).join(", ") : "");
             } else {
                 btn.textContent = homeLabel(cap && cap.bought >= cap.max ? "Bag full ✓" :
                     all.length ? "Nothing to buy: " + whyNothing(all, cap) : "Nothing worth buying here");

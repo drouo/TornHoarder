@@ -194,6 +194,24 @@ class AbroadJsTest(unittest.TestCase):
         out = self.run_page(rows=rows, wallet=2_000_000)
         self.assertTrue(out["button"].startswith("Buy 2 × Xanax"), out["button"])
 
+    CANADA = [
+        {"id": 1484, "name": "Bear Gall", "cost": 28_570, "stock": 724},
+        {"id": 262, "name": "Hockey Stick", "cost": 400, "stock": 160},
+    ]
+    CANADA_PRICES = {"checked": 4102444800, "sell": {"1484": 33_122, "262": 4_425}}
+
+    def test_short_on_cash_it_fills_the_bag_with_cheaper_items_instead(self):
+        # $60k buys 2 Bear Galls (+$9.1k) and 7 Hockey Sticks, leaving 9 slots
+        # empty; 1 Bear Gall and 17 Hockey Sticks makes +$73k.
+        out = self.run_page(rows=self.CANADA, prices=self.CANADA_PRICES, wallet=60_000)
+        self.assertTrue(out["button"].startswith("Buy 1 × Bear Gall · $28,570 (+$4,552) · then 17 × Hockey Stick"),
+                        out["button"])
+
+    def test_with_cash_to_spare_the_most_profitable_item_fills_the_bag(self):
+        out = self.run_page(rows=self.CANADA, prices=self.CANADA_PRICES, wallet=1_191_071)
+        self.assertTrue(out["button"].startswith("Buy 18 × Bear Gall"), out["button"])
+        self.assertNotIn("then", out["button"])
+
     def test_says_why_when_profitable_items_cant_be_bought(self):
         self.assertIn("Nothing to buy: can't read your bag count", self.run_page(noBag=True)["button"])
         self.assertIn("Nothing to buy: not enough cash on hand", self.run_page(wallet=10)["button"])

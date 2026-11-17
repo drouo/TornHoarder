@@ -209,7 +209,9 @@ Torn's API has no stock data for shops abroad, so `tools/log_foreign_stock.py` l
 
 **Buy confirmations and the trip log.** On the shop page abroad, a buy counts once Torn's "You have purchased X / N items" goes up, whether the button bought it or you did by hand. The panel then lists "✓ Bought 18 × Xanax · $… (+$… expected)", and the buy goes to `data/trip_buys.csv` through the local server (`POST /trip-buy`). **Where to fly** opens with a **Trip log**: one row per trip with what you spent, the expected profit at the prices when you bought, and the profit at the latest Plan a trip prices. It also learns your bag size for the restock alerts.
 
-**Restock alerts.** The local server's `/restocks` lists items abroad that went from sold out to in stock in the last hour and still are, from the foreign stock log. On any Torn page at home, the userscript chimes once and shows a blue pill when a full bag of one clears $100,000 at the app's sell prices (so click **Plan a trip** first), with a **Fly ✈** link; **dismiss** hides those.
+**Restock alerts.** The local server's `/restocks` lists items abroad that went from sold out to in stock in the last hour and still are, from the foreign stock log. On any Torn page at home, the userscript shows a blue **🔔 N back in stock abroad** line in the tray when a full bag of one clears $100,000 at the app's sell prices (so click **Plan a trip** first); open it for a **Fly ✈** link, and **dismiss** hides those. It's quiet unless you turn on the chime.
+
+**The tray.** Every notice the userscript shows on Torn pages sits in one stack at the bottom left, one line each: below minimum, city-shop count, restocks abroad, and listings to pull for a trader. Click a line to open it; opening one closes the others. **⚙** switches each kind on or off, and the restock chime (off by default), in this browser. The page's own action button (Buy, List, Fly, Trade) stays at the top.
 
 ## App layout
 

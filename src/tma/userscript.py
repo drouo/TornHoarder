@@ -1782,29 +1782,92 @@ TEMPLATE = """\
         location.href = r.stops[r.i].url;
     }
 
+    // ---- Tray: every notice in one stack, bottom left ------------------------
+    // One line per kind (below minimum, city shops, restocks abroad, listings
+    // to pull); clicking one opens it and closes the others, so they never
+    // cover each other. ⚙ turns kinds (and the restock chime) on or off.
+    var TRAY_KEY = "tornhoarder.tray.";
+    var TRAY_KINDS = [["stock", "Below minimum", "on"], ["city", "City-shop count", "on"],
+                      ["restock", "Restocks abroad", "on"], ["chime", "Chime on a restock", "off"]];
+    var trayHost = null;
+    var trayOpen = "";
+    var trayDraws = [];
+
+    function trayOn(kind) {
+        var def = TRAY_KINDS.filter(function (k) { return k[0] === kind; })[0];
+        return readPref(TRAY_KEY + kind, def ? def[2] : "on") === "on";
+    }
+
+    function tray() {
+        if (!trayHost) {
+            trayHost = document.createElement("div");
+            trayHost.id = "th-tray";
+            trayHost.style.cssText = "position:fixed;left:12px;bottom:56px;z-index:999997;display:flex;" +
+                "flex-direction:column;align-items:flex-start;gap:6px;max-width:360px;";
+            document.body.appendChild(trayHost);
+        }
+        return trayHost;
+    }
+
+    function trayChip(id, css) {
+        var chip = document.createElement("div");
+        chip.id = id;
+        chip.style.cssText = "max-width:360px;padding:5px 12px;border-radius:14px;color:#fff;" +
+            "font:bold 13px/1.4 Arial,sans-serif;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.5);" + (css || "");
+        tray().appendChild(chip);
+        return chip;
+    }
+
+    function trayToggle(id) {
+        trayOpen = trayOpen === id ? "" : id;
+        trayDraws.forEach(function (f) { f(); });
+    }
+
+    function traySettings() {
+        var box = trayChip("th-tray-settings", "background:rgba(0,0,0,.9);font-weight:normal;cursor:default;order:9;display:none;");
+        var gear = trayChip("th-tray-gear", "background:rgba(0,0,0,.6);padding:2px 8px;font-weight:normal;order:10;");
+        gear.textContent = "⚙";
+        gear.title = "Choose which TornHoarder notices show";
+        gear.addEventListener("click", function () { trayToggle("th-tray-settings"); });
+
+        function draw() {
+            box.style.display = trayOpen === "th-tray-settings" ? "block" : "none";
+            box.textContent = "";
+            TRAY_KINDS.forEach(function (k) {
+                var line = document.createElement("div");
+                line.textContent = (trayOn(k[0]) ? "☑ " : "☐ ") + k[1];
+                line.style.cssText = "cursor:pointer;";
+                line.addEventListener("click", function (ev) {
+                    ev.stopPropagation();
+                    var on = !trayOn(k[0]);
+                    writePref(TRAY_KEY + k[0], on ? "on" : "off");
+                    thLog("[TornHoarder] tray: " + k[1] + " " + (on ? "on" : "off"));
+                    trayDraws.forEach(function (f) { f(); });
+                });
+                box.appendChild(line);
+            });
+        }
+        trayDraws.push(draw);
+        draw();
+    }
+
     // ---- Keep stocked: badge on every Torn page -----------------------------
     // Shows what's below its minimum, from the app's latest check (fetched
     // live from the app, else as of when this script was built).
     function stockBadge() {
         var status = STOCK;
-        var open = false;
-        var pill = document.createElement("div");
-        pill.id = "th-stock-badge";
-        pill.style.cssText = "position:fixed;left:12px;bottom:56px;z-index:999997;max-width:360px;padding:6px 12px;" +
-            "border-radius:16px;background:rgba(183,28,28,.92);color:#fff;font:bold 13px/1.4 Arial,sans-serif;" +
-            "cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.5);display:none;";
-        document.body.appendChild(pill);
+        var pill = trayChip("th-stock-badge", "background:rgba(183,28,28,.92);display:none;");
         pill.addEventListener("click", function (ev) {
             if (ev.target && ev.target.tagName === "A") {
                 return;
             }
-            open = !open;
-            draw();
+            trayToggle(pill.id);
         });
 
         function draw() {
             var short = (status && status.short) || [];
-            pill.style.display = short.length ? "block" : "none";
+            var open = trayOpen === pill.id;
+            pill.style.display = short.length && trayOn("stock") ? "block" : "none";
             if (!short.length) {
                 return;
             }
@@ -1861,6 +1924,7 @@ TEMPLATE = """\
                 }
             });
         }
+        trayDraws.push(draw);
         draw();
         refresh();
         setInterval(refresh, 120000);
@@ -1913,11 +1977,7 @@ TEMPLATE = """\
     function cityBadge() {
         var plan = { checked: 0, route: [] };
         var fixing = false;
-        var pill = document.createElement("div");
-        pill.id = "th-city-badge";
-        pill.style.cssText = "position:fixed;left:12px;bottom:56px;z-index:999997;max-width:360px;padding:6px 12px;" +
-            "border-radius:16px;color:#fff;font:bold 13px/1.4 Arial,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.5);";
-        document.body.appendChild(pill);
+        var pill = trayChip("th-city-badge", "cursor:default;");
 
         function link(text, onClick) {
             var a = document.createElement("span");
@@ -1951,13 +2011,11 @@ TEMPLATE = """\
             if (fixing) {
                 return;
             }
-            if (awayMessage()) {
+            if (awayMessage() || !trayOn("city")) {
                 pill.style.display = "none";
                 return;
             }
             pill.style.display = "block";
-            var stock = document.getElementById("th-stock-badge");
-            pill.style.bottom = stock && stock.style.display !== "none" ? ((stock.offsetHeight || 30) + 64) + "px" : "56px";
             var used = Math.min(cityUsed(), CITY_CAP);
             var left = CITY_CAP - used;
             var ms = dayStartMs(Date.now()) + DAY_MS - Date.now();
@@ -1990,6 +2048,7 @@ TEMPLATE = """\
                 }
             });
         }
+        trayDraws.push(draw);
         draw();
         setInterval(draw, 30000);
     }
@@ -2348,12 +2407,13 @@ TEMPLATE = """\
     function restockAlert() {
         var sell = {};
         var list = [];
-        var pill = document.createElement("div");
-        pill.id = "th-restock-badge";
-        pill.style.cssText = "position:fixed;right:12px;top:90px;z-index:999997;max-width:340px;padding:6px 12px;" +
-            "border-radius:12px;background:rgba(21,101,192,.95);color:#fff;font:bold 13px/1.4 Arial,sans-serif;" +
-            "box-shadow:0 2px 10px rgba(0,0,0,.5);display:none;";
-        document.body.appendChild(pill);
+        var pill = trayChip("th-restock-badge", "background:rgba(21,101,192,.95);display:none;");
+        pill.addEventListener("click", function (ev) {
+            if (ev.target && ev.target.tagName === "A") {
+                return;
+            }
+            trayToggle(pill.id);
+        });
 
         function keys(k) {
             return readPref(k, "").split(",").filter(Boolean);
@@ -2392,18 +2452,27 @@ TEMPLATE = """\
 
         function draw() {
             var found = hits();
-            if (awayMessage() || !found.length) {
+            if (awayMessage() || !found.length || !trayOn("restock")) {
                 pill.style.display = "none";
                 return;
             }
             var fresh = found.filter(function (h) { return keys(CHIMED_KEY).indexOf(h.key) < 0; });
             if (fresh.length) {
-                chime();
+                if (trayOn("chime")) {
+                    chime();
+                }
                 remember(CHIMED_KEY, fresh.map(function (h) { return h.key; }));
+                thLog("[TornHoarder] tray: back in stock abroad: " + fresh.map(function (h) {
+                    return h.r.name + " in " + h.r.country + " +" + fmtMoney(h.load) + " a bag";
+                }).join("; "));
             }
+            var open = trayOpen === pill.id;
             pill.style.display = "block";
             pill.textContent = "";
-            pill.appendChild(document.createTextNode("🔔 Back in stock abroad"));
+            pill.appendChild(document.createTextNode("🔔 " + found.length + " back in stock abroad " + (open ? "▾" : "▸")));
+            if (!open) {
+                return;
+            }
             found.slice(0, 3).forEach(function (h) {
                 var line = document.createElement("div");
                 line.style.cssText = "font-weight:normal;margin-top:4px;";
@@ -2449,6 +2518,7 @@ TEMPLATE = """\
         if (typeof GM_xmlhttpRequest === "undefined") {
             return;
         }
+        trayDraws.push(draw);
         refresh();
         setInterval(refresh, 120000);
     }
@@ -2887,6 +2957,7 @@ TEMPLATE = """\
     stockBadge();
     cityBadge();
     restockAlert();
+    traySettings();
     if (location.pathname.indexOf("/shops.php") === 0 || location.pathname.indexOf("/bigalgunshop.php") === 0) {
         watchCityBuys();
     }
@@ -3057,15 +3128,19 @@ TEMPLATE = """\
             }
             logLayout("viewListing");
             if (!pill) {
-                pill = document.createElement("div");
-                pill.id = "th-pull";
-                pill.style.cssText = "position:fixed;right:12px;top:90px;z-index:999997;max-width:340px;padding:8px 12px;" +
-                    "border-radius:8px;background:rgba(0,0,0,.9);border:1px solid #c62828;color:#eee;" +
-                    "font:13px/1.5 Arial,sans-serif;";
-                document.body.appendChild(pill);
+                pill = trayChip("th-pull", "background:rgba(0,0,0,.9);border:1px solid #c62828;");
+                pill.addEventListener("click", function () { trayToggle(pill.id); });
+                trayDraws.push(draw);
+                if (!trayOpen) {
+                    trayOpen = pill.id;  // the reason for this page: open at first
+                }
             }
             pill.style.display = "block";
-            setLines(pill, ["Pull these listings: a trader pays more than they net after tax"].concat(
+            if (trayOpen !== pill.id) {
+                setLines(pill, ["↩ Pull " + plan.pull.length + " listing(s) for a trader ▸"]);
+                return;
+            }
+            setLines(pill, ["↩ Pull these listings: a trader pays more than they net after tax ▾"].concat(
                 plan.pull.map(function (r) {
                     return "· " + r.name + " ×" + r.amount + " at " + fmtMoney(r.price) + " → " + r.trader + " pays " +
                         fmtMoney(r.pays);

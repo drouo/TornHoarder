@@ -168,6 +168,14 @@ const text = e => [e.textContent].concat((e.kids || []).map(text)).join("\n");
 const badge = made.find(e => e.id === "th-stock-badge");
 const out = { badgeShown: badge.style.display, badge: text(badge) };
 if (page.openBadge) { badge.onclick({ target: {} }); out.badgeOpen = text(badge); }
+if (page.gear) {
+  // ⚙ opens the settings (closing the badge); its first line switches "Below minimum".
+  made.find(e => e.id === "th-tray-gear").onclick();
+  const box = made.find(e => e.id === "th-tray-settings");
+  out.settings = text(box); out.badgeAfterGear = text(badge);
+  box.kids[0].onclick({ stopPropagation() {} });
+  out.badgeAfterOff = badge.style.display;
+}
 const btn = made.find(e => e.id === "th-restock-btn");
 if (btn) out.button = btn.textContent;
 if (btn && page.click) {
@@ -204,6 +212,16 @@ class StockJsTest(unittest.TestCase):
         self.assertIn("⚠ 1 item(s) below minimum ▸", out["badge"])
         self.assertIn("First Aid Kit: 38 of 50", out["badgeOpen"])
         self.assertIn("buy 12 →", out["badgeOpen"])
+
+    def test_notices_stack_one_open_at_a_time_and_switch_off_in_settings(self):
+        stock = {"checked": 0, "short": [{"name": "First Aid Kit", "have": 38, "min": 50, "need": 12, "url": "u"}]}
+        out = self.run_page({"openBadge": True, "gear": True}, stock=stock)
+        self.assertIn("☑ Below minimum", out["settings"])
+        self.assertIn("☐ Chime on a restock", out["settings"])
+        # This fake DOM keeps old children around: the last redraw is what's shown.
+        self.assertTrue(out["badgeAfterGear"].rstrip().endswith("below minimum ▸"), out["badgeAfterGear"])
+        self.assertEqual(out["badgeAfterOff"], "none")
+        self.assertEqual(out["store"]["tornhoarder.tray.stock"], "off")
 
     def test_market_restock_picks_the_cheapest_listing_under_the_cap(self):
         page = {"location": {"pathname": "/page.php", "search": "?sid=ItemMarket&thneed=67:12:11893"},

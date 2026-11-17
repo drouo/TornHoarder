@@ -142,7 +142,9 @@ global.console = { log() {} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
 const text = e => [e.textContent].concat((e.kids || []).map(text)).join("");
 const pill = made.find(e => e.id === "th-restock-badge");
-const out = { shown: pill.style.display !== "none", pill: text(pill), chimes, store };
+const out = { shown: pill.style.display !== "none", chip: text(pill), chimes, store };
+if (page.open || page.dismiss) pill.onclick({ target: {} });
+out.pill = text(pill);
 const link = (function find(e) { if (e.href) return e; for (const k of e.kids || []) { const f = find(k); if (f) return f; } return null; })(pill);
 out.href = link ? link.href : null;
 if (page.dismiss) {
@@ -168,18 +170,24 @@ class RestockAlertJsTest(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             return json.loads(res.stdout)
 
-    def test_a_worthwhile_restock_chimes_once_and_links_to_fly(self):
-        out = self.run_page()
+    def test_a_worthwhile_restock_is_a_quiet_chip_that_opens_to_a_fly_link(self):
+        out = self.run_page(open=True)
         self.assertTrue(out["shown"])
+        self.assertEqual(out["chip"], "🔔 1 back in stock abroad ▸")
+        self.assertEqual(out["chimes"], 0)
         self.assertIn("Xanax in Japan: 380 in stock (10 min ago), +$540,000 a bag", out["pill"])
         self.assertEqual(out["href"], "https://www.torn.com/page.php?sid=travel&thfly=Japan")
+
+    def test_the_chime_is_opt_in_and_rings_once_per_restock(self):
+        out = self.run_page(store={"tornhoarder.tray.chime": "on"})
         self.assertEqual(out["chimes"], 1)
-        again = self.run_page(store=out["store"])
-        self.assertTrue(again["shown"])
-        self.assertEqual(again["chimes"], 0)
+        self.assertEqual(self.run_page(store=out["store"])["chimes"], 0)
+
+    def test_restock_notices_can_be_switched_off(self):
+        self.assertFalse(self.run_page(store={"tornhoarder.tray.restock": "off"})["shown"])
 
     def test_bag_size_learned_abroad_sets_the_load(self):
-        out = self.run_page(store={"tornhoarder.bagSize": "29"})
+        out = self.run_page(open=True, store={"tornhoarder.bagSize": "29"})
         self.assertIn("+$870,000 a bag", out["pill"])
 
     def test_small_or_unpriced_restocks_stay_quiet(self):

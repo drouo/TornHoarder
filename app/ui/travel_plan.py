@@ -12,7 +12,9 @@ from tma.fmt import money
 from tma.http_client import session_for_requests, shared_bucket
 from tma.item_stats import load_profiles
 from tma.market_fetch import fetch_all_item_markets
-from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices, write_prices
+from tma.config import load_traders
+from tma.traders import best_offers, refresh_prices
+from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices, with_traders, write_prices
 from tma.trips import load_buys, trip_table
 
 from .. import paths
@@ -51,14 +53,16 @@ def _planner(api_key: str) -> None:
             f"Odds come from {h.span_h:.0f} hours of logged stock abroad: for each item, every past moment it was "
             "in the same state as now (sold out, short of a full load, or a full load), and what was there one "
             "flight later. Profit is $1 under the cheapest listing (never above market value) after the 5% tax, "
-            "minus the cost abroad. More history means better odds; a few days covers every time of day."
+            "or a trader's price when one pays more (no tax on a trade), minus the cost abroad. More history means better odds; a few days covers every time of day."
         )
         c1, c2 = st.columns(2)
         cap = c1.number_input("Items you can carry", min_value=1, max_value=100, value=18, key="travel_cap")
         kind = c2.selectbox("Travel by", list(TRAVEL_SPEED), index=list(TRAVEL_SPEED).index("Airstrip"), key="travel_kind")
         if st.button("Plan a trip", key="plan_trip", disabled=not api_key):
             refs = {int(k): v.get("market_price") or 0 for k, v in load_profiles(paths.PROFILES_PATH).items()}
-            ids = candidates(h, refs)
+            traders = load_traders()
+            offers = best_offers(traders, refresh_prices(paths.TRADER_PRICES_PATH, traders, session_for_requests())[0])
+            ids = candidates(h, refs, offers)
             page = PageProgress()
             bar = st.progress(0.0, text="Checking market prices…")
 
@@ -69,8 +73,9 @@ def _planner(api_key: str) -> None:
             rows, _ = fetch_all_item_markets(session_for_requests(), shared_bucket(), api_key, ids, {i: 0 for i in ids}, on_progress=progress)
             bar.empty()
             page.clear()
-            sell = sell_prices(rows, refs)
-            write_prices(paths.TRAVEL_PRICES_PATH, sell)
+            # A trader that pays more than the market nets sets the price (no tax on a trade).
+            sell, via = with_traders(sell_prices(rows, refs), offers)
+            write_prices(paths.TRAVEL_PRICES_PATH, sell, via=via)
             st.session_state["travel_plan"] = {"sell": sell, "when": pd.Timestamp.now().strftime("%H:%M")}
         got = st.session_state.get("travel_plan")
         if not got:

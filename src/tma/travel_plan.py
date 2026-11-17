@@ -116,17 +116,35 @@ def sell_prices(market_rows: dict[int, dict], ref_prices: dict[int, float]) -> d
     return out
 
 
-def write_prices(path: Path, sell: dict[int, float], now: Optional[float] = None) -> None:
-    """Save sell prices for the userscript, which picks what to buy on the shop page abroad."""
+def with_traders(sell: dict[int, float], offers: dict[int, dict]) -> tuple[dict[int, float], dict[int, str]]:
+    """What each item fetches at best: the market (after tax) or the best
+    trader's price (a trade has no tax). Also {item: trader} where a trader
+    pays more."""
+    out, via = dict(sell), {}
+    for iid, o in (offers or {}).items():
+        if o["price"] > out.get(iid, 0):
+            out[iid] = float(o["price"])
+            via[iid] = o["trader"]
+    return out, via
+
+
+def write_prices(path: Path, sell: dict[int, float], now: Optional[float] = None,
+                 via: Optional[dict[int, str]] = None) -> None:
+    """Save sell prices for the userscript, which picks what to buy on the shop page abroad
+    (and, in `via`, which items go to a trader rather than the market)."""
     data = {"checked": int(now or time.time()), "sell": {str(k): round(v) for k, v in sell.items()}}
+    if via:
+        data["via"] = {str(k): v for k, v in via.items()}
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(data), encoding="utf-8")
 
 
-def candidates(h: History, ref_prices: dict[int, float]) -> list[int]:
-    """Items worth a live price check: profitable at market value somewhere."""
+def candidates(h: History, ref_prices: dict[int, float], offers: Optional[dict[int, dict]] = None) -> list[int]:
+    """Items worth a live price check: profitable somewhere at market value, or at a trader's price."""
+    offers = offers or {}
     return sorted({iid for (c, iid), cost in h.cost.items()
-                   if cost > 0 and (ref_prices.get(iid) or 0) * (1.0 - MARKET_FEE) > cost})
+                   if cost > 0 and max((ref_prices.get(iid) or 0) * (1.0 - MARKET_FEE),
+                                       (offers.get(iid) or {}).get("price", 0)) > cost})
 
 
 def plan_trips(h: History, now: float, sell: dict[int, float], cap: int = 18, speed: float = 0.5,

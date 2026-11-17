@@ -2403,6 +2403,7 @@ TEMPLATE = """\
     var CHIMED_KEY = "tornhoarder.restockChimed";
     var HIDDEN_KEY = "tornhoarder.restockHidden";
     var RESTOCK_MIN = 100000;
+    var PRICES_STALE_MIN = 90;  // abroad: older sell prices get a warning to re-check them
 
     function restockAlert() {
         var sell = {};
@@ -2567,7 +2568,8 @@ TEMPLATE = """\
                     id: id, el: row, name: nameEl ? nameEl.textContent.trim() : "item " + id, box: box,
                     hidden: row.querySelector("input.input-money[type=hidden]"),
                     buy: row.querySelector("button[class*=buyButton]"),
-                    cost: cost, stock: stockEl ? num(stockEl.parentElement.textContent) : 0, profit: sell - cost
+                    cost: cost, stock: stockEl ? num(stockEl.parentElement.textContent) : 0, profit: sell - cost,
+                    via: (prices.via || {})[id] || ""
                 };
         }
 
@@ -2834,9 +2836,15 @@ TEMPLATE = """\
                 lines.push("No prices yet: in the app, open Where to fly and click Plan a trip, then reload this page.");
             } else {
                 var age = Math.round((Date.now() / 1000 - prices.checked) / 60);
-                lines.push("Best buys here, by the app's prices from " + age + " min ago (profit each after tax):");
+                if (age > PRICES_STALE_MIN) {
+                    lines.push("⚠ These prices are " + (age >= 120 ? Math.floor(age / 60) + "h " + age % 60 + "m" : age + " min") +
+                        " old: click Plan a trip in the app, then reload this page.");
+                }
+                lines.push("Best buys here, by the app's prices from " + age + " min ago (profit each, after the market's " +
+                    "tax or at a trader's price):");
                 all.slice(0, 6).forEach(function (r) {
-                    lines.push("· " + r.name + ": +" + fmtMoney(r.profit) + " · " + r.stock.toLocaleString("en-US") + " in stock");
+                    lines.push("· " + r.name + ": +" + fmtMoney(r.profit) + (r.via ? " to " + r.via : "") + " · " +
+                        r.stock.toLocaleString("en-US") + " in stock");
                 });
                 if (!all.length) {
                     lines.push("Nothing in stock here resells at a profit.");

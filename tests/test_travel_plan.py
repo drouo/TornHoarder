@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tma.autoupdate_server import build_server
 from tma.foreign_stock import StockLog
-from tma.travel_plan import arrival_samples, candidates, load_history, plan_trips, sell_prices, write_prices
+from tma.travel_plan import arrival_samples, candidates, load_history, plan_trips, sell_prices, with_traders, write_prices
 
 STEP = 300  # the logger's 5 minutes
 
@@ -69,6 +69,26 @@ class TravelPlanTest(unittest.TestCase):
         with TemporaryDirectory() as d:
             h, _ = build(d, lambda i: 10, lambda i: 10)
             self.assertEqual(candidates(h, {1: 2000, 2: 1000, 3: 1100}), [1, 3])
+
+    def test_a_trader_who_pays_more_sets_the_price(self):
+        # Canada, 11-17: Shekels pays more than the market nets for both.
+        sell = {1483: 8522.0, 1484: 33_122.0, 262: 4425.0}
+        offers = {1483: {"price": 8794.0, "trader": "Shekels"}, 1484: {"price": 34_204.0, "trader": "Shekels"},
+                  262: {"price": 4295.0, "trader": "Shekels"}, 9: {"price": 50.0, "trader": "Shekels"}}
+        out, via = with_traders(sell, offers)
+        self.assertEqual(out, {1483: 8794.0, 1484: 34_204.0, 262: 4425.0, 9: 50.0})
+        self.assertEqual(via, {1483: "Shekels", 1484: "Shekels", 9: "Shekels"})
+
+    def test_candidates_include_items_only_a_trader_makes_profitable(self):
+        with TemporaryDirectory() as d:
+            h, _ = build(d, lambda i: 10, lambda i: 10)
+            self.assertEqual(candidates(h, {1: 2000, 2: 1000, 3: 1100}, {2: {"price": 1200.0, "trader": "S"}}), [1, 2, 3])
+
+    def test_prices_name_the_trader_for_the_userscript(self):
+        with TemporaryDirectory() as d:
+            path = Path(d) / "p.json"
+            write_prices(path, {1483: 8794.0}, now=100, via={1483: "Shekels"})
+            self.assertEqual(json.loads(path.read_text()), {"checked": 100, "sell": {"1483": 8794}, "via": {"1483": "Shekels"}})
 
     def test_prices_reach_the_userscript_through_the_local_server(self):
         with TemporaryDirectory() as d:

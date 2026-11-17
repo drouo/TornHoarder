@@ -212,6 +212,14 @@ class AbroadJsTest(unittest.TestCase):
         self.assertTrue(out["button"].startswith("Buy 18 × Bear Gall"), out["button"])
         self.assertNotIn("then", out["button"])
 
+    def test_trader_prices_are_labelled_and_old_prices_flagged(self):
+        prices = dict(self.CANADA_PRICES, checked=1.9e9 - 3 * 3600, via={"1484": "Shekels"})
+        out = self.run_page(rows=self.CANADA, prices=prices)
+        self.assertIn("· Bear Gall: +$4,552 to Shekels · 724 in stock", out["panel"])
+        self.assertIn("· Hockey Stick: +$4,025 · 160 in stock", out["panel"])
+        self.assertIn("⚠ These prices are 3h 0m old: click Plan a trip in the app", out["panel"])
+        self.assertNotIn("⚠ These prices", self.run_page(rows=self.CANADA, prices=self.CANADA_PRICES)["panel"])
+
     def test_says_why_when_profitable_items_cant_be_bought(self):
         self.assertIn("Nothing to buy: can't read your bag count", self.run_page(noBag=True)["button"])
         self.assertIn("Nothing to buy: not enough cash on hand", self.run_page(wallet=10)["button"])

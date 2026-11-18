@@ -1621,6 +1621,58 @@ TEMPLATE = """\
         }, 0);
     }
 
+    // ---- A fresh plan for today's city-shop buys ----------------------------
+    // Asks the app to re-scan every city shop (about a minute), then waits for
+    // the new plan: done(plan) with the new one, or done(null) if none came.
+    var PLAN_STALE_MS = 60 * 60 * 1000;
+    var PLAN_WAIT_MS = 3 * 60 * 1000;
+
+    function refreshShopPlan(done) {
+        if (typeof GM_xmlhttpRequest === "undefined") {
+            done(null);
+            return;
+        }
+        var base = CFG.reportUrl.replace(/shop-report$/, "shop-plan");
+        var asked = Date.now();
+        thLog("[TornHoarder] shop plan: asking the app for a fresh scan");
+        GM_xmlhttpRequest({ method: "POST", url: base + "/refresh", data: "{}", headers: { "Content-Type": "application/json" } });
+
+        function poll() {
+            GM_xmlhttpRequest({
+                method: "GET", url: base,
+                onload: function (res) {
+                    var plan = null;
+                    try {
+                        plan = JSON.parse(res.responseText);
+                    } catch (e) { /* not ready */ }
+                    if (plan && (plan.checked || 0) * 1000 >= asked - 1000) {
+                        done(plan);
+                    } else if (Date.now() - asked > PLAN_WAIT_MS) {
+                        done(null);
+                    } else {
+                        setTimeout(poll, 3000);
+                    }
+                },
+                onerror: function () { done(null); }
+            });
+        }
+        setTimeout(poll, 3000);
+    }
+
+    // Re-scan, then start the new plan as a run (or say there's nothing).
+    function recheckShops(show) {
+        show("Checking every city shop… (about a minute)");
+        refreshShopPlan(function (plan) {
+            if (!plan) {
+                show("Couldn't get a fresh plan: is the app open? (click to try again)");
+            } else if (!plan.route || !plan.route.length) {
+                show("Checked every city shop: nothing resells at a profit right now");
+            } else {
+                startRestock(plan.route, "Today's buys");
+            }
+        });
+    }
+
     // ---- City shop: buy what the app picked --------------------------------
     // The app links here with &thbuy=<id>:<qty>,... Click 1 fills one item's
     // amount and presses its BUY; click 2 confirms. One item per purchase.
@@ -1643,6 +1695,7 @@ TEMPLATE = """\
         var pending = null;
         var busyUntil = 0;
         var note = "";
+        var checking = "";
         var btn = greenButton("th-buy-btn");
         var panel = infoPanel();
         var dock = makeDock(btn, panel);
@@ -1668,9 +1721,20 @@ TEMPLATE = """\
             });
         }
 
+        // A daily plan with nothing to buy here and no stop left: the plan is
+        // out of date, so the way on is a fresh scan, not "done".
+        function recheck() {
+            var r = restockRun();
+            return daily && capLeft() > 0 && !(r && r.i + 1 < r.stops.length);
+        }
+
         function render() {
             if (awayMessage()) {
                 btn.textContent = awayMessage();
+                return;
+            }
+            if (checking) {
+                btn.textContent = checking;
                 return;
             }
             var all = rows();
@@ -1690,6 +1754,8 @@ TEMPLATE = """\
                 btn.textContent = "Buy " + next.qty + " × " + next.name + (next.price ? " · " + fmtMoney(next.qty * next.price) : "");
             } else if (!capLeft() && all.some(function (r) { return r.left > 0; })) {
                 btn.textContent = "City shops' 100 a day used ✓ (click to close)";
+            } else if (recheck()) {
+                btn.textContent = "Nothing to buy here now · Re-check every city shop →";
             } else {
                 btn.textContent = all.some(function (r) { return r.left > 0; })
                     ? doneLabel("Nothing left to buy in stock here") : doneLabel("Bought ✓");
@@ -1713,6 +1779,16 @@ TEMPLATE = """\
                 return;
             }
             var next = rows().filter(function (r) { return r.qty > 0 && r.input; })[0];
+            if (!next && recheck()) {
+                if (!/^Checking/.test(checking)) {
+                    recheckShops(function (msg) {
+                        checking = msg;
+                        render();
+                    });
+                }
+                return;
+            }
+            checking = "";
             if (!next) {
                 finishStop(dock, !capLeft());
                 return;
@@ -2009,6 +2085,7 @@ TEMPLATE = """\
     function cityBadge() {
         var plan = { checked: 0, route: [] };
         var fixing = false;
+        var rechecking = "";
         var pill = trayChip("th-city-badge", "cursor:default;");
 
         function link(text, onClick) {
@@ -2058,9 +2135,19 @@ TEMPLATE = """\
                 left === CITY_CAP ? "🛒 100 city-shop buys available"
                     : left ? "🛒 City shops: " + left + " of 100 left · resets in " + when
                         : "🛒 City shops: all 100 used · resets in " + when));
-            if (left === CITY_CAP && plan.route && plan.route.length) {
+            if (rechecking) {
+                pill.appendChild(document.createTextNode(" · " + rechecking));
+            } else if (left && plan.route && plan.route.length && Date.now() - (plan.checked || 0) * 1000 < PLAN_STALE_MS) {
                 pill.appendChild(link("Today's buys: " + plan.route.length + " shop(s) →", function () {
                     startRestock(plan.route, "Today's buys");
+                }));
+            } else if (left) {
+                // No plan, or one from over an hour ago: stock has moved since.
+                pill.appendChild(link("Check shops for today's buys →", function () {
+                    recheckShops(function (msg) {
+                        rechecking = msg;
+                        draw();
+                    });
                 }));
             }
             if (used) {

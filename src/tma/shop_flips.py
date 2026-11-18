@@ -11,12 +11,13 @@ import csv
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 import requests
 
 from .http_client import BASE_URL, TokenBucket, get_json_with_retry
+from .fmt import money
 from .my_listings import market_listings
 from .sell_plan import MARKET_FEE
 from .shops import buy_url
@@ -131,6 +132,38 @@ def write_plan(path: Path, route: list[dict], now: Optional[float] = None) -> No
     """Save the day's plan for the userscript's daily-limit badge."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps({"checked": int(time.time() if now is None else now), "route": route}), encoding="utf-8")
+
+
+MIN_MARGIN_PCT = 10.0  # the Shop flips panel's default
+
+
+def refresh_plan(
+    fetch_shops: Callable[[], tuple[list[dict], Optional[str]]],
+    fetch_markets: Callable[[list[int]], dict[int, dict]],
+    refs: dict[int, float], plan_path: Path, stock_log: Optional[Path] = None,
+    min_margin: float = MIN_MARGIN_PCT, now: Optional[float] = None,
+) -> str:
+    """Today's buys from a fresh scan, without the app open on Shop flips:
+    every shop's stock now, market prices for what's in stock, then the plan
+    (picks, then backups) saved for the userscript. Returns a line for the log."""
+    items, err = fetch_shops()
+    if err:
+        raise RuntimeError(f"couldn't read city shops: {err}")
+    now = time.time() if now is None else now
+    if stock_log:
+        log_stock(stock_log, items, time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)))
+    in_stock = [it for it in items if it["stock"] > 0]
+    rows = fetch_markets(sorted({it["item_id"] for it in in_stock}))
+    df = scan_flips(in_stock, rows, refs)
+    if not df.empty:
+        df = df[df["Margin %"] >= min_margin]
+    buys, spare = daily_buy_plan(df)
+    route = plan_route(buys, day_start(now), spare) if not buys.empty else []
+    write_plan(plan_path, route, now=now)
+    if not route:
+        return f"checked {len(in_stock)} items in stock in city shops: nothing resells at {min_margin:.0f}% or more"
+    return (f"checked {len(in_stock)} items in stock in city shops: {int(buys['Buy'].sum())} buys for about "
+            f"{money(buys['Profit'].sum())} profit, {len(route)} stop(s): " + "; ".join(s["label"] for s in route))
 
 
 def daily_buy_plan(flips: pd.DataFrame, cap: int = DAILY_CAP, backups: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:

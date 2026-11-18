@@ -13,7 +13,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tma.autoupdate_server import build_server
-from tma.shop_flips import day_start, plan_route, reset_in_s, write_plan
+from tma.shop_flips import day_start, plan_route, refresh_plan, reset_in_s, write_plan
 from tma.userscript import build_userscript
 
 MIDNIGHT = 20_406 * 86_400  # 2025-11-14 00:00 UTC
@@ -54,6 +54,56 @@ class DailyLimitClockTest(unittest.TestCase):
         ])
         self.assertIn("thbuy=180:100&", route[1]["url"])
         self.assertEqual(plan_route(buys, MIDNIGHT, spare.iloc[0:0]), route[:1])
+
+    def test_a_fresh_scan_writes_todays_plan_from_whats_in_stock(self):
+        # Live: a day-old plan of one sold-out item, and nothing re-scanned it.
+        shops = [
+            {"shop": "Big Al's Gun Shop", "item_id": 392, "item_name": "Pepper Spray", "price": 800.0, "stock": 0, "default_stock": 1000},
+            {"shop": "Bits 'n' Bobs", "item_id": 180, "item_name": "Beer", "price": 10.0, "stock": 500, "default_stock": 1000},
+            {"shop": "Jewelry Store", "item_id": 52, "item_name": "Ring", "price": 100.0, "stock": 20, "default_stock": 50},
+        ]
+        asked = []
+
+        def markets(ids):
+            asked.append(ids)
+            return {180: {"price_1": 20, "amount_1": 500}, 52: {"price_1": 200, "amount_1": 50}}
+
+        with TemporaryDirectory() as d:
+            plan, log = Path(d) / "plan.json", Path(d) / "stock.csv"
+            line = refresh_plan(lambda: (shops, None), markets, {}, plan, log, now=NOON)
+            saved = json.loads(plan.read_text())
+            logged = len(log.read_text().splitlines())
+        self.assertEqual(asked, [[52, 180]])  # sold-out items cost no market call
+        self.assertEqual(saved["checked"], NOON)
+        self.assertEqual([s["label"] for s in saved["route"]], ["Jewelry Store: 20 × Ring", "Bits 'n' Bobs: 80 × Beer",
+                                                          "Bits 'n' Bobs: backup: 20 × Beer"])  # if the Rings are gone
+        self.assertTrue(saved["route"][0]["url"].endswith(f"&thchk={MIDNIGHT}&thday=1"))
+        self.assertEqual(logged, 4)  # header + every shop item, in stock or not
+        self.assertIn("100 buys", line)
+
+    def test_a_scan_with_nothing_profitable_saves_an_empty_plan(self):
+        shops = [{"shop": "Bits 'n' Bobs", "item_id": 180, "item_name": "Beer", "price": 10.0, "stock": 5, "default_stock": 9}]
+        with TemporaryDirectory() as d:
+            plan = Path(d) / "plan.json"
+            line = refresh_plan(lambda: (shops, None), lambda ids: {180: {"price_1": 9, "amount_1": 5}}, {}, plan, now=NOON)
+            self.assertEqual(json.loads(plan.read_text())["route"], [])
+        self.assertIn("nothing resells", line)
+        with self.assertRaises(RuntimeError):
+            refresh_plan(lambda: ([], "API down"), lambda ids: {}, {}, Path("unused.json"))
+
+    def test_the_userscript_can_ask_for_a_fresh_scan(self):
+        called = threading.Event()
+        with TemporaryDirectory() as d:
+            server = build_server(Path(d) / "x.user.js", port=0, on_shop_refresh=called.set)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                req = urllib.request.Request(f"http://127.0.0.1:{server.server_address[1]}/shop-plan/refresh",
+                                             data=b"{}", method="POST")
+                self.assertEqual(urllib.request.urlopen(req, timeout=5).status, 204)
+                self.assertTrue(called.wait(5))
+            finally:
+                server.shutdown()
+                server.server_close()
 
     def test_plan_reaches_the_userscript_through_the_local_server(self):
         with TemporaryDirectory() as d:
@@ -162,6 +212,12 @@ class CityBadgeJsTest(unittest.TestCase):
         self.assertIn("Today's buys: 2 shop(s) →", out["pill"])
         self.assertEqual(out["went"], "u1")
         self.assertEqual(out["run"]["name"], "Today's buys")
+
+    def test_an_old_plan_offers_a_fresh_check_instead(self):
+        plan = {"checked": NOON - 2 * 3600, "route": [{"label": "Big Al's Gun Shop: 100 × Pepper Spray", "url": "u1"}]}
+        out = self.run_page(plan=plan)
+        self.assertIn("Check shops for today's buys →", out["pill"])
+        self.assertNotIn("Today's buys:", out["pill"])
 
     def test_fix_sets_todays_count(self):
         store = {"tornhoarder.cityBuys": json.dumps([[NOON_MS - 3_600_000, 30]])}

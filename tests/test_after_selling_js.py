@@ -61,6 +61,11 @@ global.document = {
   },
   querySelectorAll(s) { return s === "div.donate" && page.donate ? [donate] : []; },
 };
+const gm = [];
+if (page.plan) {
+  // The local server: a refresh request, then the new plan when polled.
+  global.GM_xmlhttpRequest = o => { gm.push(o.method + " " + o.url.replace(/^.*:\d+/, "")); if (/shop-plan$/.test(o.url) && o.onload) o.onload({ responseText: JSON.stringify(page.plan) }); };
+}
 global.setInterval = () => 0;
 global.setTimeout = f => f();
 global.console = { log() {} };
@@ -69,7 +74,7 @@ const btn = made.find(e => /^th-.*-btn$/.test(e.id || ""));
 const text = e => [e.textContent].concat(e.kids.map(text)).join("\n");
 const dock = made.find(e => e.id === "th-dock");
 const out = { button: btn && btn.textContent, panel: dock ? text(dock.kids[2].kids[0]) : "" };
-if (page.click && btn) { btn.onclick(); out.after = btn.textContent; out.clicks = clicks; out.filled = moneyInput.value; out.run = store["tornhoarder.restockRun"] || null; }
+if (page.click && btn) { btn.onclick(); out.after = btn.textContent; out.clicks = clicks; out.filled = moneyInput.value; out.run = store["tornhoarder.restockRun"] || null; out.gm = gm; out.went = location.href; }
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -159,6 +164,21 @@ class AfterSellingTest(unittest.TestCase):
         out = self.run_page({"location": beer, "wallet": 0, "shopItems": items, "store": store, "click": True})
         self.assertEqual(out["button"], "City shops' 100 a day used ✓ (click to close)")
         self.assertIsNone(out["run"])
+
+    def test_a_sold_out_plan_rechecks_every_shop_and_starts_the_new_one(self):
+        # Live: "Nothing left to buy in stock here" on a day-old plan's only stop.
+        page = {"location": {"pathname": "/bigalgunshop.php", "search": "?thbuy=392:100&thchk=1&thday=1"}, "wallet": 0,
+                "shopItems": [], "click": True,
+                "plan": {"checked": 9_999_999_999, "route": [{"label": "Bits 'n' Bobs: 100 × Beer", "url": "u-beer"}]}}
+        out = self.run_page(page)
+        self.assertEqual(out["button"], "Nothing to buy here now · Re-check every city shop →")
+        self.assertIn("POST /shop-plan/refresh", out["gm"])
+        self.assertEqual(out["went"], "u-beer")
+        self.assertEqual(json.loads(out["run"])["name"], "Today's buys")
+
+    def test_a_restock_link_with_nothing_in_stock_is_just_done(self):
+        page = {"location": {"pathname": "/bigalgunshop.php", "search": "?thbuy=392:5&thchk=1"}, "wallet": 0, "shopItems": []}
+        self.assertIn("Nothing left to buy in stock here", self.run_page(page)["button"])
 
 
 class BuyUrlTest(unittest.TestCase):

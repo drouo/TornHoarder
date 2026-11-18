@@ -61,7 +61,7 @@ Copies of the same weapon differ by their rolls (damage and accuracy for weapons
 
 Nothing is ever listed for a silly price:
 
-- Fast-sell ignores listings under half the clean median, so one $1 troll listing can't set the floor.
+- Fast-sell ignores listings under 3/4 of the clean median, so a $1 troll listing or a dumper can't set the floor. Each quality band of the weapon/armor curve drops its own dumpers the same way, and a worse band is never priced above a better one; a band of a single listing never pulls the bands below it down.
 - A listing is never priced below what a city shop would pay after the 5% tax (`ceil(shop price / 0.95)`). Below that, the item goes to the shop instead.
 - A listing more than 50% under Torn's reference market price is held back, not listed.
 - No weapon/armor copy lists below the item's fast-sell floor, whatever its quality band says.

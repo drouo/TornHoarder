@@ -50,13 +50,24 @@ class BuildStatPayloadTest(unittest.TestCase):
         self.assertEqual(band["fast"], 100.0)
 
     def test_a_worse_band_never_prices_above_a_better_one(self):
-        df = _weapon_frame(n=4).assign(listing_quality=[5.0, 5.0, 30.0, 45.0],
-                                       price=[1900.0, 1900.0, 1351.0, 1876.0], quantity=[1, 1, 1, 1])
+        df = _weapon_frame(n=6).assign(listing_quality=[5.0, 5.0, 30.0, 30.0, 45.0, 45.0],
+                                       price=[1900.0, 1900.0, 1351.0, 1351.0, 1876.0, 1876.0], quantity=[1] * 6)
         points = build_stat_payload(df)["points"]
         self.assertEqual([p["q"] for p in points], [5.0, 30.0, 45.0])
         for key in ("fast", "fair", "greedy"):
             prices = [p[key] for p in points]
             self.assertEqual(prices, [1351.0, 1351.0, 1876.0], key)
+
+    def test_one_cheap_copy_doesnt_drag_the_bands_below_it(self):
+        df = _weapon_frame(n=5).assign(listing_quality=[5.0, 5.0, 30.0, 45.0, 45.0],
+                                       price=[1500.0, 1500.0, 1400.0, 300.0, 2000.0], quantity=[1] * 5)
+        points = build_stat_payload(df)["points"]
+        # The $300 copy is a dumper in its band; the lone q30 copy caps nothing.
+        self.assertEqual([(p["q"], p["n"], p["fast"]) for p in points], [(5.0, 2, 1500.0), (30.0, 1, 1400.0), (45.0, 1, 2000.0)])
+        # A legitimately cheaper low band is kept as it is.
+        df = _weapon_frame(n=4).assign(listing_quality=[5.0, 5.0, 45.0, 45.0], price=[1000.0, 1100.0, 2000.0, 2100.0],
+                                       quantity=[1] * 4)
+        self.assertEqual([p["n"] for p in build_stat_payload(df)["points"]], [2, 2])
 
     def test_weapon_payload(self):
         payload = build_stat_payload(_weapon_frame())

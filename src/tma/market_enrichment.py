@@ -9,7 +9,7 @@ import pandas as pd
 EXCLUSIVE_TOTAL_UNITS_THRESHOLD = 200.0
 EXCLUSIVE_DOMINANCE_SHARE = 0.50
 EXCLUSIVE_HIGH_FACTOR = 10.0
-LOW_OUTLIER_FACTOR = 0.5  # listings under half the clean median aren't the "floor"
+LOW_OUTLIER_FACTOR = 0.75  # listings under 3/4 of the clean median aren't the "floor"
 
 QUALITY_STEP = 5.0
 MIN_QUALITY_SAMPLES = 5
@@ -333,7 +333,8 @@ def _rising_with_quality(points: list[dict]) -> None:
     """Caps each band at the price of every better band, so a worse copy is
     never priced above a better one. A band of junk copies can sit above the
     rest when a few sellers ask too much for them (live: Leather Bullwhips at
-    quality 5 listed for $1,900 while quality 28 went for $1,351)."""
+    quality 5 listed for $1,900 while quality 28 went for $1,351). A band of
+    one listing is capped but caps nothing: one cheap copy isn't a price."""
     for key in ("fast", "fair", "greedy"):
         cap = None
         for p in reversed(points):  # best quality first
@@ -342,7 +343,8 @@ def _rising_with_quality(points: list[dict]) -> None:
                 continue
             if cap is not None and v > cap:
                 p[key] = cap
-            cap = p[key] if cap is None else min(cap, p[key])
+            if p.get("n", 0) >= 2:
+                cap = p[key] if cap is None else min(cap, p[key])
 
 
 def build_stat_payload(df_item: pd.DataFrame) -> dict:
@@ -360,6 +362,13 @@ def build_stat_payload(df_item: pd.DataFrame) -> dict:
     for bucket, grp in df_q.groupby("bucket"):
         if grp.empty:
             continue
+        # A dumper in a band would set its fast price, like the item's floor.
+        # Against the upper (quantity-weighted) median, so in a band of two
+        # single copies the cheap one is measured against the other.
+        d = grp.sort_values("price")
+        cum = d["quantity"].to_numpy(dtype=float).cumsum()
+        ref = float(d["price"].to_numpy(dtype=float)[int(np.argmax(cum > cum[-1] / 2.0))])
+        grp = grp[grp["price"] >= LOW_OUTLIER_FACTOR * ref]
         # Prices and their quantities must be sorted together, or each price
         # gets another listing's weight.
         by_price = grp.sort_values("price")

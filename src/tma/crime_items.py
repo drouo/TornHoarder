@@ -8,7 +8,8 @@ whether the OC consumes it (ID Badge, Zip Ties, C4) or you keep it
 Regular crimes have no such list; the only signal is an item's own
 description and effect ("Required for the disposal of firearms in Disposal",
 "Improves Disposal crime exp", "Unlocks additional outcomes ... in Burglary",
-"Ignites a fire in Arson"). `crime_hint()` flags those, ignoring references
+"Ignites a fire in Arson", "Used when placing a skimmer on an ATM" for Card
+Skimming). `crime_hint()` flags those, ignoring references
 to the retired Crimes 1.0.
 """
 
@@ -34,7 +35,7 @@ MANUAL_CRIME_TOOLS = {
 
 _CRIME_WORDS = (
     r"crimes?|disposal|forgery|burglary|scamming|cracking|bootlegging|graffiti|shoplifting|"
-    r"pickpocketing|card skimming|skimming|hustling|arson|counterfeiting|search for cash"
+    r"pickpocketing|card skimming|skimming|skimmers?|hustling|arson|counterfeiting|search for cash"
 )
 _HINT = re.compile(
     rf"\b(required|used|needed|useful|unlocks?|enables?|allows?|increases?|boosts?|grants?)\b[^.]{{0,80}}"

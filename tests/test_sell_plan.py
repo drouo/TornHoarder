@@ -217,6 +217,13 @@ class CrimeHintTest(unittest.TestCase):
         self.assertFalse(crime_hint("Used to plant a virus in Crimes 1.0.", None))
         self.assertFalse(crime_hint("A plushie.", "Can be exchanged at the museum."))
 
+    def test_card_skimming_gear_is_a_crime_item(self):
+        # Live: 170 Card Skimmers and 84 Spy Cameras were planned for sale;
+        # Torn's text never names the crime, only the skimmer.
+        self.assertTrue(crime_hint("Install this Spy Camera in a discrete location.", "Used when placing a skimmer on an ATM."))
+        self.assertTrue(crime_hint("A Card Skimmer jammed into an ATM can record the details of hundreds of cards.",
+                                   "Used when placing a skimmer on an ATM."))
+
     def test_parse_organized_crimes(self):
         data = {"organizedcrimes": [
             {"name": "Pet Project", "difficulty": 1, "slots": [

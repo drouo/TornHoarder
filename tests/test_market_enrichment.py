@@ -49,6 +49,15 @@ class BuildStatPayloadTest(unittest.TestCase):
         (band,) = build_stat_payload(df)["points"]
         self.assertEqual(band["fast"], 100.0)
 
+    def test_a_worse_band_never_prices_above_a_better_one(self):
+        df = _weapon_frame(n=4).assign(listing_quality=[5.0, 5.0, 30.0, 45.0],
+                                       price=[1900.0, 1900.0, 1351.0, 1876.0], quantity=[1, 1, 1, 1])
+        points = build_stat_payload(df)["points"]
+        self.assertEqual([p["q"] for p in points], [5.0, 30.0, 45.0])
+        for key in ("fast", "fair", "greedy"):
+            prices = [p[key] for p in points]
+            self.assertEqual(prices, [1351.0, 1351.0, 1876.0], key)
+
     def test_weapon_payload(self):
         payload = build_stat_payload(_weapon_frame())
         self.assertEqual(payload["stat_type"], "Weapon")

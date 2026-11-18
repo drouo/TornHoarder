@@ -329,6 +329,22 @@ def _median_stat(df_q: pd.DataFrame, col: str) -> float | None:
     return float(np.median(idx.to_numpy(dtype=float)))
 
 
+def _rising_with_quality(points: list[dict]) -> None:
+    """Caps each band at the price of every better band, so a worse copy is
+    never priced above a better one. A band of junk copies can sit above the
+    rest when a few sellers ask too much for them (live: Leather Bullwhips at
+    quality 5 listed for $1,900 while quality 28 went for $1,351)."""
+    for key in ("fast", "fair", "greedy"):
+        cap = None
+        for p in reversed(points):  # best quality first
+            v = p.get(key)
+            if v is None:
+                continue
+            if cap is not None and v > cap:
+                p[key] = cap
+            cap = p[key] if cap is None else min(cap, p[key])
+
+
 def build_stat_payload(df_item: pd.DataFrame) -> dict:
     df_item = df_item.copy()
     if "listing_quality" not in df_item.columns:
@@ -354,6 +370,7 @@ def build_stat_payload(df_item: pd.DataFrame) -> dict:
         greedy = _weighted_quantile(prices, weights, 0.75)
         points.append({"q": float(bucket), "n": int(len(grp)), "fast": fast, "fair": fair, "greedy": greedy})
     points.sort(key=lambda p: p["q"])
+    _rising_with_quality(points)
 
     median_quality = float(np.median(df_q["listing_quality"].to_numpy(dtype=float)))
     median_stats = {

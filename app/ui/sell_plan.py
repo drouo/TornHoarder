@@ -688,28 +688,9 @@ VIEW_LISTINGS_URL = "https://www.torn.com/page.php?sid=ItemMarket#/viewListing"
 
 
 def _render_my_listings(rows: list[dict]) -> None:
-    if not rows:
-        st.caption("No active Item Market listings.")
-        return
-    df = pd.DataFrame(rows)
-    n_fix = int(df["New price"].notna().sum())
-    st.markdown(f"**Your listings**: {len(df)} active · {n_fix} worth re-pricing")
-    st.dataframe(
-        df.sort_values(["New price", "Item"], na_position="last"),
-        width="stretch",
-        hide_index=True,
-        column_order=("Item", "Quality", "Amount", "Your price", "Cheapest other", "Cheaper listings", "New price", "Status"),
-        column_config={
-            "Amount": st.column_config.NumberColumn(format="localized"),
-            **{c: st.column_config.NumberColumn(format="compact") for c in ("Your price", "Cheapest other", "New price")},
-        },
-    )
-    st.markdown(f"[**Open your listings →**]({VIEW_LISTINGS_URL})")
-    st.caption(
-        "Checked against the market this run: your own listing is left out, and weapon/armor copies only compete "
-        "with copies of the same quality or better. **New price** is $1 under the cheapest other listing, never under "
-        "what a shop pays or half Torn's reference price; when you're cheapest by a wide margin it's what you could ask."
-    )
+    # Re-pricing what's already listed is its own step (Listings), not part of selling.
+    if rows:
+        st.caption(f"You have {len(rows)} active Item Market listing(s): check and re-price them in **Listings**.")
 
 
 def _render_money(funds: Optional[dict], proceeds: float) -> None:

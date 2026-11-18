@@ -3617,6 +3617,151 @@ TEMPLATE = """\
         setInterval(draw, 2000);
     }
 
+    // ---- Your listings: re-price from the app's Listings check -------------
+    // Each row's info button names it ("itemInfo-<item>-<copy uid>", 0 for a
+    // stack, which is then matched by its current price too). Big drops are
+    // left out until you tick them. Fill sets Torn's price boxes; you check
+    // them and press Torn's Save changes yourself.
+    var LISTING_STALE_MS = 2 * 60 * 60 * 1000;
+
+    function moneyOf(s) {
+        return parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
+    }
+
+    function repriceMode() {
+        var plan = null;
+        var include = {};
+        var filled = {};
+        var missing = 0;
+        var dock = null;
+        var btn = null;
+        var panel = null;
+
+        function key(r) {
+            return r.item_id + ":" + (r.uid || "0") + ":" + r.now;
+        }
+
+        function priceBoxes(row) {
+            var ins = Array.prototype.slice.call(row.querySelectorAll("input.input-money"));
+            var vis = ins.filter(function (i) { return i.type !== "hidden"; });
+            var hid = ins.filter(function (i) { return i.type === "hidden"; });
+            return vis.length ? { visible: vis[vis.length - 1], hidden: hid[hid.length - 1] || null } : null;
+        }
+
+        function rowFor(r) {
+            var infos = document.querySelectorAll('button[aria-controls$="itemInfo-' + r.item_id + "-" + (r.uid || "0") + '"]');
+            for (var i = 0; i < infos.length; i++) {
+                var row = (infos[i].closest && infos[i].closest("[class*=itemRow]")) || infos[i].parentElement;
+                var box = row && priceBoxes(row);
+                if (box && (r.uid || filled[key(r)] || moneyOf(box.visible.value) === Math.round(r.now))) {
+                    return box;
+                }
+            }
+            return null;
+        }
+
+        function todo() {
+            return (plan.rows || []).filter(function (r) { return include[key(r)] && !filled[key(r)]; });
+        }
+
+        function render() {
+            var here = /viewListing/i.test(location.hash || "");
+            if (dock) {
+                dock.show(here);
+            }
+            if (!here || !plan || !(plan.rows || []).length) {
+                return;
+            }
+            if (!dock) {
+                btn = greenButton("th-reprice-btn");
+                panel = infoPanel();
+                dock = makeDock(btn, panel);
+                btn.addEventListener("click", fill);
+            }
+            var n = todo().length;
+            var done = Object.keys(filled).length;
+            btn.textContent = n ? "Fill " + n + " new price(s)" + (done ? " (" + done + " filled)" : "")
+                : done ? "Filled " + done + " · check them, then press Torn's Save changes"
+                    : "Tick the listings to re-price";
+            var age = Date.now() - (plan.checked || 0) * 1000;
+            var sig = JSON.stringify([include, filled, missing, age > LISTING_STALE_MS]);
+            if (panel.getAttribute("data-sig") === sig) {
+                return;  // unchanged: keep the panel (and its scroll) as it is
+            }
+            panel.setAttribute("data-sig", sig);
+            var keepTop = panel.scrollTop;
+            panel.textContent = "";
+            function line(text, style, onClick) {
+                var div = document.createElement("div");
+                div.textContent = text;
+                div.style.cssText = (style || "") + (onClick ? "cursor:pointer;" : "");
+                if (onClick) {
+                    div.addEventListener("click", onClick);
+                }
+                panel.appendChild(div);
+            }
+            line("Re-prices from the app's Listings check. Click a line to tick or untick it; ⚠ cuts deep and is " +
+                "left out until you tick it:", "color:#9ccc65;margin-bottom:4px;");
+            if (age > LISTING_STALE_MS) {
+                line("⚠ Checked " + Math.round(age / 3600000) + " h ago: prices may have moved. Check again in the app first.",
+                    "color:#ffb74d;margin-bottom:4px;");
+            }
+            plan.rows.forEach(function (r) {
+                var k = key(r);
+                var mark = filled[k] ? "✓ filled " : include[k] ? "☑ " : "☐ ";
+                line(mark + r.name + (r.quality != null ? " (q" + Math.round(r.quality) + ")" : "") + ": " +
+                    fmtMoney(r.now) + " → " + fmtMoney(r.new) + (r.big ? " ⚠" : "") + " · " + r.status + " · " + r.why,
+                    (r.big ? "color:#ffb74d;" : "") + (include[k] || filled[k] ? "" : "color:#888;"),
+                    filled[k] ? null : function () {
+                        include[k] = !include[k];
+                        render();
+                    });
+            });
+            if (missing) {
+                line(missing + " not on screen: scroll down so Torn shows them, then click again.", "color:#ffb74d;margin-top:4px;");
+            }
+            panel.scrollTop = keepTop;
+        }
+
+        function fill() {
+            if (!plan) {
+                return;
+            }
+            missing = 0;
+            var did = [];
+            todo().forEach(function (r) {
+                var box = rowFor(r);
+                if (!box) {
+                    missing += 1;
+                    return;
+                }
+                setMoney(box.visible, box.hidden, Math.round(r.new));
+                filled[key(r)] = true;
+                did.push(r.name + " " + fmtMoney(r.now) + " → " + fmtMoney(r.new));
+            });
+            thLog("[TornHoarder] reprice: filled " + did.length + (missing ? ", " + missing + " not on screen" : "") +
+                (did.length ? ": " + did.join("; ") : ""));
+            render();
+        }
+
+        if (typeof GM_xmlhttpRequest !== "undefined") {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CFG.reportUrl.replace(/shop-report$/, "listing-plan"),
+                onload: function (res) {
+                    try {
+                        plan = JSON.parse(res.responseText);
+                    } catch (e) {
+                        plan = null;
+                    }
+                    ((plan && plan.rows) || []).forEach(function (r) { include[key(r)] = !r.big; });
+                    render();
+                }
+            });
+        }
+        setInterval(render, 1500);
+    }
+
     if (location.pathname.indexOf("/trade.php") === 0) {
         tradeMode();
         return;
@@ -3638,6 +3783,7 @@ TEMPLATE = """\
     if (location.pathname.indexOf("/page.php") === 0 && /sid=ItemMarket/i.test(location.search)) {
         listMode();
         pullMode();
+        repriceMode();
     }
 })();
 """

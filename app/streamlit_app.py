@@ -24,6 +24,7 @@ from app.ui.page_progress import PageProgress
 from app.ui.profile_card import render_loadout, render_profile_card
 from app.ui.results import render_results
 from app.ui.restock_watch import render_restock_watch
+from app.ui.listings_check import render_listings_check
 from app.ui.shop_scan import render_shop_scan
 from app.ui.status_board import current_section, render_section_bar, render_sidebar, render_status_board
 from app.ui.stock_minimums import check_keep_stocked, render_keep_stocked
@@ -162,6 +163,10 @@ if section == "Restock":
     st.stop()
 if section == "Travel":
     render_travel_plan(st.session_state["api_key"])
+    finish()
+    st.stop()
+if section == "Listings":
+    render_listings_check(st.session_state["api_key"])
     finish()
     st.stop()
 if section == "Help":

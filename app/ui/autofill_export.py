@@ -23,7 +23,7 @@ from tma.travel_plan import load_history
 from tma.quality import PREMIUM_THRESHOLD, base_stats_map
 from tma.userscript import TEMPLATE_HASH, build_userscript, template_of
 
-from ..paths import (AUTOFILL_PATH, CITYSHOP_STOCK_PATH, FOREIGN_STOCK_PATH, FOREIGN_UPDATES_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
+from ..paths import (AUTOFILL_PATH, CITYSHOP_STOCK_PATH, FOREIGN_STOCK_PATH, LISTING_PLAN_PATH, FOREIGN_UPDATES_PATH, PROFILES_PATH, SHOP_BUYS_PATH,
                      SHOP_PLAN_PATH, STOCK_STATUS_PATH, TRADE_PLAN_PATH, TRADER_PRICES_PATH, TRAVEL_PRICES_PATH,
                      TRIP_BUYS_PATH, USERSCRIPT_INPUTS_PATH)
 from .stock_minimums import status_json
@@ -94,7 +94,8 @@ def _ensure_update_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
         server = build_server(AUTOFILL_PATH, port=port, reports_path=SHOP_BUYS_PATH, status_path=STOCK_STATUS_PATH,
                               travel_path=TRAVEL_PRICES_PATH, plan_path=SHOP_PLAN_PATH,
                               trips_path=TRIP_BUYS_PATH, foreign_path=FOREIGN_STOCK_PATH, trade_path=TRADE_PLAN_PATH,
-                              on_flying=_prelanding().flying, on_shop_refresh=_refresh_shop_plan)
+                              on_flying=_prelanding().flying, on_shop_refresh=_refresh_shop_plan,
+                              listing_path=LISTING_PLAN_PATH)
     except OSError:
         # Port already bound — most likely this same server from a prior process
         # (e.g. `tools/update_server.py` run by hand), so the URL is still live.

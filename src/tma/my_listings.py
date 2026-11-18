@@ -9,17 +9,25 @@ Weapon/armor copies only compete with copies of equal or better quality.
 
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
 from typing import Optional
 
 import requests
 
 from .fmt import money
 from .http_client import BASE_URL, TokenBucket, get_json_with_retry
+from .market_enrichment import LOW_OUTLIER_FACTOR, few_cheap
 from .sell_plan import price_guards
 
 MAX_PAGES = 20
 # Cheapest by more than this vs the next listing: you could ask more.
 GAP_PCT = 10.0
+# A suggestion this far under your price, or under this share of Torn's
+# market value, is flagged: it never fills without your tick.
+BIG_DROP_PCT = 25.0
+REF_WARN = 0.8
 
 
 def fetch_my_listings(
@@ -103,6 +111,9 @@ def review_listing(
     shop_price: Optional[float] = None,
     ref_price: Optional[float] = None,
 ) -> dict:
+    """One listing against the others: Status says what's going on, Why what
+    the suggested price rests on, and Big drop flags a suggestion that cuts
+    deep (your call, never a one-click fill)."""
     item = mine.get("item") or {}
     price = float(mine["price"])
     quality = ((item.get("stats") or {}).get("quality")) if item.get("uid") else None
@@ -110,6 +121,15 @@ def review_listing(
     if item.get("uid"):
         others = [l for l in others if l.get("quality") is not None and quality is not None and l["quality"] >= quality]
     others.sort(key=lambda l: l["price"])
+    # A dumper far under the rest isn't the price to match (as for selling).
+    dumped = []
+    if len(others) >= 3:
+        mid = others[len(others) // 2]["price"]
+        dumped = [l for l in others if l["price"] < LOW_OUTLIER_FACTOR * mid]
+        if few_cheap(len(dumped), len(others)):
+            others = others[len(dumped):]
+        else:
+            dumped = []  # that many cheap listings are the market, not dumpers
     shop_min, ref_min = price_guards(shop_price, ref_price)
     floor = max(shop_min or 0, ref_min or 0) or None
 
@@ -126,26 +146,56 @@ def review_listing(
         "New price": None,
         "Status": "",
     }
+    def usd(v: float) -> str:  # exact: in a reason $1,359 and $1,360 differ
+        return f"${v:,.0f}"
+
+    why = [f"{len(others)} other listing(s)" + (f" at quality {quality:.0f}+" if quality is not None else "")]
+    if others:
+        why.append(f"cheapest {usd(others[0]['price'])}")
+    if dumped:
+        why.append(f"ignored {len(dumped)} dumped under {usd(LOW_OUTLIER_FACTOR * mid)}")
+    if floor:
+        why.append(f"never under {usd(floor)} (" + " / ".join(
+            n for n, v in (("shop pays", shop_min), ("half market value", ref_min)) if v and v == floor) + ")")
+    row["Why"] = " · ".join(why)
+
     if not others:
         row["Status"] = "only listing" + (" of this quality or better" if item.get("uid") else "")
-        return row
-    best = others[0]["price"]
-    if best < price:
-        target = best - 1
-        if floor and target < floor:
-            row["Status"] = f"undercut by {money(price - best)}; matching it would go under your floor {money(floor)}"
-        else:
-            row["Status"] = f"undercut by {money(price - best)}"
-            row["New price"] = target
-    elif best == price:
-        row["Status"] = "tied for cheapest"
-        if not floor or price - 1 >= floor:
-            row["New price"] = price - 1
     else:
-        gap = (best - price) / best * 100.0
-        if gap > GAP_PCT:
-            row["Status"] = f"cheapest by {gap:.0f}%: could ask up to {money(best - 1)}"
-            row["New price"] = best - 1
+        best = others[0]["price"]
+        if best < price:
+            target = best - 1
+            if floor and target < floor:
+                row["Status"] = f"undercut by {money(price - best)}; matching it would go under your floor {money(floor)}"
+            else:
+                row["Status"] = f"undercut by {money(price - best)}"
+                row["New price"] = target
+        elif best == price:
+            row["Status"] = "tied for cheapest"
+            if not floor or price - 1 >= floor:
+                row["New price"] = price - 1
         else:
-            row["Status"] = "cheapest"
+            gap = (best - price) / best * 100.0
+            if gap > GAP_PCT:
+                row["Status"] = f"cheapest by {gap:.0f}%: could ask up to {money(best - 1)}"
+                row["New price"] = best - 1
+            else:
+                row["Status"] = "cheapest"
+    new = row["New price"]
+    row["Big drop"] = bool(new is not None and (new < price * (1 - BIG_DROP_PCT / 100.0) or
+                                                (ref_price and new < REF_WARN * ref_price)))
     return row
+
+
+def listing_plan(rows: list[dict]) -> list[dict]:
+    """The re-prices for the userscript's panel on your listings page."""
+    return [{"item_id": r["item_id"], "uid": str(r["uid"]) if r.get("uid") else None, "name": r["Item"],
+             "quality": r.get("Quality"), "now": r["Your price"], "new": r["New price"], "why": r.get("Why", ""),
+             "status": r.get("Status", ""), "big": bool(r.get("Big drop"))}
+            for r in rows if r.get("New price") is not None and r.get("item_id")]
+
+
+def write_listing_plan(path: Path, rows: list[dict], now: Optional[float] = None) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps({"checked": int(time.time() if now is None else now), "rows": listing_plan(rows)}),
+                          encoding="utf-8")

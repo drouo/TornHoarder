@@ -158,7 +158,7 @@ Items you always want on hand, with a minimum each: e.g. First Aid Kit 50, Ipeca
 
 ## Your listings
 
-Each Run also reads your active listings (`user/itemmarket`) and checks them against the current market. That includes items you no longer hold, which cost one extra market call each. The **Your listings** section on the Sell plan tab shows each one's price, the cheapest other listing, how many listings are cheaper, and a status:
+Re-pricing what you already have listed is its own step: the **Listings** section, not Sell. **Check my listings** reads your active listings (`user/itemmarket`) and the market for each item listed (one call per item), and shows each listing's price, the new price, a status and **Why**: how many other listings it was compared with, the cheapest of them, any dumpers ignored and the floor it can't go under. Sell still reads your listings, to leave listed copies out of the plan and to flag listings a trader pays more for.
 
 | Status | New price |
 |---|---|
@@ -167,7 +167,9 @@ Each Run also reads your active listings (`user/itemmarket`) and checks them aga
 | **cheapest by N%** (more than 10% under the next listing) | what you could ask: $1 under the next listing |
 | **cheapest**, **only listing** | none |
 
-Your own listing is left out of the comparison. Weapon/armor copies only compete with copies of the same quality or better. A new price is never suggested below what a shop pays (after the tax) or half Torn's reference price. **Open your listings →** goes to Torn's page, where you change prices and click **SAVE CHANGES**. A one-button fill for that page is planned.
+None of your own listings count as the market (copies are matched by uid, stacks by price and amount), so nothing you list or re-price undercuts another of yours. Weapon/armor copies only compete with copies of the same quality or better. A few listings far under the rest (at most 2, or 10% of them, under 3/4 of the median) are dumpers and ignored; many cheap listings are the market and count. A new price is never suggested below what a shop pays (after the tax) or half Torn's reference price.
+
+**⚠ Big drops:** a new price more than 25% under yours, or under 80% of Torn's market value, is flagged. **Open your listings to re-price →** goes to Torn's page, where the userscript lists the re-prices with their reasons. Click a line to tick or untick it; ⚠ ones start unticked. **Fill N new prices** sets Torn's price boxes for the ticked listings it can see (scroll to load more, then click again), and you check them and press Torn's **Save changes** yourself.
 
 ## Museum sets
 

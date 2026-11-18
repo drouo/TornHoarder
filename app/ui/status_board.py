@@ -16,9 +16,10 @@ from tma.config import clear_api_key, load_api_key, load_minimums, save_api_key
 from .. import paths
 from . import autofill_export
 
-SECTIONS = ("Sell", "Restock", "Travel", "Help")
+SECTIONS = ("Sell", "Listings", "Restock", "Travel", "Help")
 SECTION_HELP = {
     "Sell": "Price your items, plan what goes where, build the Torn script",
+    "Listings": "Check what you have listed against the market and re-price it",
     "Restock": "Keep stocked, today's city-shop buys, restock watch",
     "Travel": "Where to fly, the trip log",
     "Help": "How the app works",

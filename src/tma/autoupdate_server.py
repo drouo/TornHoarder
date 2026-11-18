@@ -77,6 +77,7 @@ def _make_handler(
     travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
     trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None, trade_path: Optional[Path] = None,
     on_flying: Optional[Callable[[], None]] = None, on_shop_refresh: Optional[Callable[[], None]] = None,
+    listing_path: Optional[Path] = None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     # JSON the app writes for the userscript to fetch, with what to serve before it exists.
     feeds = {
@@ -84,6 +85,7 @@ def _make_handler(
         "/travel-prices": (travel_path, b'{"checked": 0, "sell": {}}'),  # buying abroad
         "/shop-plan": (plan_path, b'{"checked": 0, "route": []}'),  # the day's city-shop buys
         "/trade-plan": (trade_path, b'{"checked": 0, "traders": [], "pull": []}'),  # what to give each trader
+        "/listing-plan": (listing_path, b'{"checked": 0, "rows": []}'),  # re-prices for your listings
     }
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -172,8 +174,9 @@ def build_server(
     status_path: Optional[Path] = None, travel_path: Optional[Path] = None, plan_path: Optional[Path] = None,
     trips_path: Optional[Path] = None, foreign_path: Optional[Path] = None, trade_path: Optional[Path] = None,
     on_flying: Optional[Callable[[], None]] = None, on_shop_refresh: Optional[Callable[[], None]] = None,
+    listing_path: Optional[Path] = None,
 ) -> http.server.HTTPServer:
     """Build (but don't start) the update server. Raises OSError if the port is taken."""
     return http.server.HTTPServer(("127.0.0.1", port), _make_handler(
         script_path, reports_path, status_path, travel_path, plan_path, trips_path, foreign_path, trade_path, on_flying,
-        on_shop_refresh))
+        on_shop_refresh, listing_path))

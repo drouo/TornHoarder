@@ -9,6 +9,7 @@ bought; "now" uses the latest Plan a trip prices.
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +38,21 @@ def record_buy(path: Path, rec: dict) -> None:
         if new:
             w.writeheader()
         w.writerow(row)
+    bag = int(rec.get("bag") or 0)
+    if bag > 0:  # what the shop page abroad says you can carry
+        bag_path(path).write_text(json.dumps({"bag": bag, "ts": row["ts"]}), encoding="utf-8")
+
+
+def bag_path(buys_path: Path) -> Path:
+    return Path(buys_path).with_name("bag_size.json")
+
+
+def load_bag_size(buys_path: Path) -> Optional[int]:
+    """How many items you can carry abroad, as Torn last showed it; None before any trip."""
+    try:
+        return int(json.loads(bag_path(buys_path).read_text(encoding="utf-8"))["bag"]) or None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def load_buys(path: Path) -> list[dict]:

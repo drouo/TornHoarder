@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tma.autoupdate_server import build_server
 from tma.foreign_stock import recent_restocks
-from tma.trips import load_buys, record_buy, trip_table
+from tma.trips import load_bag_size, load_buys, record_buy, trip_table
 from tma.userscript import build_userscript
 
 T = 1_794_600_000
@@ -66,6 +66,17 @@ class TripLogTest(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+
+class BagSizeTest(unittest.TestCase):
+    def test_the_planner_carries_what_torn_last_said_fits(self):
+        with TemporaryDirectory() as d:
+            path = Path(d) / "trip_buys.csv"
+            self.assertIsNone(load_bag_size(path))
+            record_buy(path, buy(T))  # an older script that doesn't send it
+            self.assertIsNone(load_bag_size(path))
+            record_buy(path, dict(buy(T + 60), bag=29))  # a bigger suitcase
+            self.assertEqual(load_bag_size(path), 29)
 
 
 class RestockTest(unittest.TestCase):

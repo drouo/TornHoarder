@@ -71,7 +71,7 @@ const rows = page.rows.map(r => {
   row.buy = buy;
   return row;
 });
-const bag = n => (page.noBag ? "You are in Cayman Islands." : "You have purchased " + n + " / 18 items so far.");
+const bag = n => (page.noBag ? "You are in Cayman Islands." : "You have purchased " + n + " / " + (page.bagSize || 18) + " items so far.");
 let onClick = null;
 // Torn's own fly-home control (label unverified live) and its confirm.
 let homeAsking = false;
@@ -117,6 +117,9 @@ if (page.handBuy != null) { onClick({ target: { closest: () => rows[page.handBuy
 if (page.landed != null) {
   // Torn's bag count goes up once the buy goes through.
   document.body.textContent = bag(page.bought + page.landed);
+  ticks.forEach(f => f());
+  out.settling = btn.textContent;
+  clock += 3500;  // Torn's bag, stock and wallet have caught up
   ticks.forEach(f => f());
   out.button = btn.textContent;
   out.panel = made.map(text).join("\n");
@@ -166,7 +169,19 @@ class AbroadJsTest(unittest.TestCase):
         self.assertTrue(out["posts"][0]["url"].endswith("/trip-buy"))
         self.assertEqual({k: v for k, v in out["posts"][0]["data"].items() if k != "ts"},
                          {"country": "mexico", "item_id": 261, "item_name": "Wolverine Plushie",
-                          "qty": 7, "cost": 20, "sell": 30_000})
+                          "qty": 7, "cost": 20, "sell": 30_000, "bag": 18})
+
+    def test_after_a_buy_it_waits_for_torn_before_offering_more(self):
+        # Live: offered more items right after the bag was filled, before
+        # Torn's count caught up.
+        out = self.run_page(bought=11, click=True, landed=3)
+        self.assertEqual(out["settling"], "Updating your bag…")
+        self.assertTrue(out["button"].startswith("Buy 4 × Wolverine Plushie"), out["button"])
+
+    def test_a_bigger_bag_is_read_from_torn_and_reported(self):
+        out = self.run_page(bagSize=29, bought=11, click=True, landed=18)
+        self.assertIn("Bag: 29 of 29 bought.", out["panel"])
+        self.assertEqual(out["posts"][0]["data"]["bag"], 29)
 
     def test_buys_by_hand_are_logged_too(self):
         out = self.run_page(handBuy=3, landed=5)

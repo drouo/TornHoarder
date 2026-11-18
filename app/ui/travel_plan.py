@@ -15,7 +15,7 @@ from tma.market_fetch import fetch_all_item_markets
 from tma.config import load_traders
 from tma.traders import best_offers, refresh_prices
 from tma.travel_plan import TRAVEL_SPEED, candidates, load_history, plan_trips, sell_prices, with_traders, write_prices
-from tma.trips import load_buys, trip_table
+from tma.trips import load_bag_size, load_buys, trip_table
 
 from .. import paths
 from .page_progress import PageProgress
@@ -56,7 +56,11 @@ def _planner(api_key: str) -> None:
             "or a trader's price when one pays more (no tax on a trade), minus the cost abroad. More history means better odds; a few days covers every time of day."
         )
         c1, c2 = st.columns(2)
-        cap = c1.number_input("Items you can carry", min_value=1, max_value=100, value=18, key="travel_cap")
+        bag = load_bag_size(paths.TRIP_BUYS_PATH)
+        cap = c1.number_input(
+            "Items you can carry", min_value=1, max_value=1000, value=bag or 18, key="travel_cap",
+            help="From Torn's shop page abroad on your last trip" if bag else "Set once you've bought abroad with the Torn script",
+        )
         kind = c2.selectbox("Travel by", list(TRAVEL_SPEED), index=list(TRAVEL_SPEED).index("Airstrip"), key="travel_kind")
         if st.button("Plan a trip", key="plan_trip", disabled=not api_key):
             refs = {int(k): v.get("market_price") or 0 for k, v in load_profiles(paths.PROFILES_PATH).items()}

@@ -2673,6 +2673,11 @@ TEMPLATE = """\
         var lastBuy = null;   // the row whose Buy was pressed last, by us or by hand
         var buyAt = 0;
         var bagSeen = null;   // items in the bag at the last look
+        // After a confirm, and whenever the bag count moves, Torn updates the
+        // bag, the stock and your wallet one by one: offering the next buy
+        // before they all settle can offer items for a bag that's already full.
+        var SETTLE_MS = 3000;
+        var settleUntil = 0;
         var bought = [];      // what landed in the bag this visit
         var btn = greenButton("th-abroad-btn");
         var panel = infoPanel();
@@ -2945,7 +2950,8 @@ TEMPLATE = """\
                     headers: { "Content-Type": "application/json" },
                     data: JSON.stringify({
                         ts: Math.floor(Date.now() / 1000), country: document.body.dataset.country || "",
-                        item_id: Number(r.id), item_name: r.name, qty: n, cost: r.cost, sell: Number(prices.sell[r.id]) || 0
+                        item_id: Number(r.id), item_name: r.name, qty: n, cost: r.cost, sell: Number(prices.sell[r.id]) || 0,
+                        bag: (capacity() || {}).max || 0
                     })
                 });
             }
@@ -2957,6 +2963,9 @@ TEMPLATE = """\
             }
             if (bagSeen != null && cap.bought > bagSeen) {
                 landed(cap.bought - bagSeen);
+            }
+            if (bagSeen != null && cap.bought !== bagSeen) {
+                settleUntil = Date.now() + SETTLE_MS;
             }
             bagSeen = cap.bought;
             writePref(BAG_KEY, String(cap.max));
@@ -3009,8 +3018,11 @@ TEMPLATE = """\
                 note = "Torn didn't take it; check the page and try again";
             }
             var c = pendingConfirm();
-            var n = next(all);
-            if (Date.now() < busyUntil) {
+            var settling = !pending && Date.now() < settleUntil;
+            var n = settling ? null : next(all);
+            if (settling) {
+                btn.textContent = "Updating your bag…";
+            } else if (Date.now() < busyUntil) {
                 btn.textContent = homeAt && !pending ? "Taking off…" : "Buying…";
             } else if (pending && c) {
                 btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.row.name + " · " + fmtMoney(pending.qty * pending.row.cost);
@@ -3032,7 +3044,7 @@ TEMPLATE = """\
         }
 
         btn.addEventListener("click", function () {
-            if (Date.now() < busyUntil) {
+            if (Date.now() < busyUntil || (!pending && Date.now() < settleUntil)) {
                 return;
             }
             note = "";
@@ -3040,6 +3052,7 @@ TEMPLATE = """\
                 var c = pendingConfirm();
                 if (c) {
                     busyUntil = Date.now() + 2000;
+                    settleUntil = Date.now() + 2000 + SETTLE_MS;
                     pressed = c;
                     c.click();
                 }

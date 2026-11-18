@@ -181,6 +181,26 @@ class AfterSellingTest(unittest.TestCase):
         self.assertIn("item 392 sold out here since the scan", self.run_page(page)["button"])
 
 
+@unittest.skipUnless(NODE, "node not installed")
+class HtmlForLogTest(unittest.TestCase):
+    # Live: the trade page's HTML went into the log with Torn's websocket
+    # token in it (its script-stripping regexes never matched).
+    def test_page_html_is_logged_without_scripts_or_the_websocket_token(self):
+        src = build_userscript({}, {})
+        start = src.index("function htmlFor(el, max) {")
+        fn = src[start:src.index("\n    }\n", start) + 6]
+        page = ('<div class="content-wrapper"><div style="display: none" id="websocketConnectionData">'
+                '{"url":"wss://x","token":"eyJhbGciOi.secret"}</div><script>boot()</script>'
+                '<button>Buy</button><i title=\'{"token":"abc"}\'></i></div>')
+        js = fn + "\nprocess.stdout.write(htmlFor({ outerHTML: " + json.dumps(page) + " }));"
+        out = subprocess.run([NODE, "-e", js], capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("secret", out.stdout)
+        self.assertNotIn("abc", out.stdout)
+        self.assertNotIn("boot()", out.stdout)
+        self.assertIn("<button>Buy</button>", out.stdout)
+
+
 class BuyUrlTest(unittest.TestCase):
     def test_links_carry_ids_and_quantities(self):
         self.assertEqual(buy_url("Bits 'n' Bobs", {180: 100, 187: 0}),

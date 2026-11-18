@@ -1403,11 +1403,27 @@ TEMPLATE = """\
                 buttons.filter(function (b) { return /^buy/i.test(label(b)); })[0] : null) || null;
     }
 
+    // An element's markup for the log, without scripts or Torn's websocket
+    // token (the session's credentials, which never belong in a log).
+    function htmlFor(el, max) {
+        return ((el && el.outerHTML) || "")
+            .replace(/<script[\\s\\S]*?<\\/script>/gi, "")
+            .replace(/<div[^>]*id="websocketConnectionData"[^>]*>[\\s\\S]*?<\\/div>/gi, "")
+            .replace(/("?token"?\\s*[:=]\\s*)"[^"]*"/gi, '$1"…"')
+            .replace(/\\s+/g, " ").slice(0, max || 8000);
+    }
+
     function logConfirmMiss(what, row) {
         thLog("[TornHoarder] " + what + " confirm not recognized. Row: " + ((row && row.textContent) || "").trim() +
             " · buttons on the page: " + Array.prototype.map.call(document.querySelectorAll("button"), function (b) {
                 return (b.textContent || "").trim();
             }).join(" | "));
+        // What Torn put up after Buy: the row itself and anything dialog-like.
+        var boxes = Array.prototype.filter.call(document.querySelectorAll(
+            "[role=dialog], [role=alertdialog], [class*=confirm], [class*=Confirm], [class*=modal], [class*=Modal], [class*=popup], [class*=dialog]"),
+            function (b) { return b.offsetParent !== null && !b.closest("#th-dock"); });
+        thLog("[TornHoarder] " + what + " confirm html: row: " + htmlFor(row, 3000) + " || dialogs: " +
+            boxes.slice(0, 3).map(function (b) { return htmlFor(b, 2000); }).join(" || "));
     }
 
     // Torn's money boxes: a visible formatted field plus a hidden twin.
@@ -2818,6 +2834,14 @@ TEMPLATE = """\
             homeLogged = true;
             thLog("[TornHoarder] abroad: no fly-home control recognized. Buttons and links: " +
                 visibleControls().map(function (b) { return (b.textContent || "").trim(); }).filter(Boolean).join(" | "));
+            // Anything clickable that talks about going home, whatever its tag.
+            var near = Array.prototype.filter.call(document.querySelectorAll(
+                "button, a, [role=button], [role=tab], [tabindex], [class*=button], [class*=Button], [class*=travel], [class*=Travel]"),
+                function (b) {
+                    return !b.closest("#th-dock") && /torn|home|return|back|travel|fly/i.test(b.textContent || "") &&
+                        (b.textContent || "").length < 200;
+                });
+            thLog("[TornHoarder] abroad home html: " + near.slice(0, 12).map(function (b) { return htmlFor(b, 600); }).join(" || "));
         }
 
         // Clicked, but no question and no takeoff: the control wasn't the
@@ -3372,8 +3396,7 @@ TEMPLATE = """\
                     return (row && row.outerHTML) || "";
                 }).join(" || ")
                 : (scope.outerHTML || "");
-            thLog("[TornHoarder] trade html " + st + ": " + html.replace(/<script[\\s\\S]*?<\\/script>/gi, "")
-                .replace(/\\s+/g, " ").slice(0, 8000));
+            thLog("[TornHoarder] trade html " + st + ": " + htmlFor({ outerHTML: html }));
         }
 
         // Add items rows: the amount box, and the item by its image (/images/items/<id>/) or name.

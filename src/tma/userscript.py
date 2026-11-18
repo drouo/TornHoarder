@@ -1715,7 +1715,7 @@ TEMPLATE = """\
                 var price = priceEl ? parseInt(((priceEl.textContent.match(/\\$\\s*([0-9,]+)/) || [0, "0"])[1]).replace(/,/g, ""), 10) || 0 : 0;
                 var left = Math.max(want[id] - boughtSince(id, since), 0);
                 return {
-                    id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, input: input,
+                    id: id, name: nameEl ? nameEl.textContent.trim() : (PRICE_MAP[id] || {}).name || "item " + id, input: input,
                     stock: stock, price: price, qty: Math.min(left, stock, cap), left: left
                 };
             });
@@ -1754,11 +1754,13 @@ TEMPLATE = """\
                 btn.textContent = "Buy " + next.qty + " × " + next.name + (next.price ? " · " + fmtMoney(next.qty * next.price) : "");
             } else if (!capLeft() && all.some(function (r) { return r.left > 0; })) {
                 btn.textContent = "City shops' 100 a day used ✓ (click to close)";
-            } else if (recheck()) {
-                btn.textContent = "Nothing to buy here now · Re-check every city shop →";
             } else {
-                btn.textContent = all.some(function (r) { return r.left > 0; })
-                    ? doneLabel("Nothing left to buy in stock here") : doneLabel("Bought ✓");
+                // Torn hides a sold-out item from the shop's buy list (the same
+                // item under "Sell items" is yours, not the shop's).
+                var gone = all.filter(function (r) { return r.left > 0; }).map(function (r) { return r.name; });
+                var soldOut = gone.length ? gone.join(", ") + " sold out here since the scan" : "";
+                btn.textContent = recheck() ? soldOut + " · Re-check every city shop →"
+                    : soldOut ? doneLabel(soldOut) : doneLabel("Bought ✓");
             }
             if (note) {
                 btn.textContent += " — " + note;

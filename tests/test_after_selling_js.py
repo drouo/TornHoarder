@@ -171,14 +171,14 @@ class AfterSellingTest(unittest.TestCase):
                 "shopItems": [], "click": True,
                 "plan": {"checked": 9_999_999_999, "route": [{"label": "Bits 'n' Bobs: 100 × Beer", "url": "u-beer"}]}}
         out = self.run_page(page)
-        self.assertEqual(out["button"], "Nothing to buy here now · Re-check every city shop →")
+        self.assertEqual(out["button"], "item 392 sold out here since the scan · Re-check every city shop →")
         self.assertIn("POST /shop-plan/refresh", out["gm"])
         self.assertEqual(out["went"], "u-beer")
         self.assertEqual(json.loads(out["run"])["name"], "Today's buys")
 
     def test_a_restock_link_with_nothing_in_stock_is_just_done(self):
         page = {"location": {"pathname": "/bigalgunshop.php", "search": "?thbuy=392:5&thchk=1"}, "wallet": 0, "shopItems": []}
-        self.assertIn("Nothing left to buy in stock here", self.run_page(page)["button"])
+        self.assertIn("item 392 sold out here since the scan", self.run_page(page)["button"])
 
 
 class BuyUrlTest(unittest.TestCase):

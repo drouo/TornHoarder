@@ -32,7 +32,7 @@ function el(extra) {
 }
 const clicks = [];
 const store = page.store || {};
-global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } };
+global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }, removeItem: k => { delete store[k]; } };
 global.window = { scrollTo() {}, innerWidth: 0 };
 window.top = window;
 global.location = Object.assign({ pathname: "/", search: "", hash: "", href: "" }, page.location);
@@ -69,7 +69,7 @@ const btn = made.find(e => /^th-.*-btn$/.test(e.id || ""));
 const text = e => [e.textContent].concat(e.kids.map(text)).join("\n");
 const dock = made.find(e => e.id === "th-dock");
 const out = { button: btn && btn.textContent, panel: dock ? text(dock.kids[2].kids[0]) : "" };
-if (page.click && btn) { btn.onclick(); out.after = btn.textContent; out.clicks = clicks; out.filled = moneyInput.value; }
+if (page.click && btn) { btn.onclick(); out.after = btn.textContent; out.clicks = clicks; out.filled = moneyInput.value; out.run = store["tornhoarder.restockRun"] || null; }
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -142,6 +142,23 @@ class AfterSellingTest(unittest.TestCase):
         # A restock link (not daily) still counts everything since its check.
         restock = dict(base, location={"pathname": "/shops.php", "search": f"?step=candy&thbuy=210:100&thchk={yesterday}"})
         self.assertIn("Bought ✓", self.run_page(restock)["button"])
+
+    def test_buys_stop_at_whats_left_of_the_days_100(self):
+        import time
+        now_ms = int(time.time() * 1000)
+        beer = {"pathname": "/shops.php", "search": "?step=bitsnbobs&thbuy=180:100&thday=1"}
+        items = [{"id": 180, "name": "Bottle of Beer", "stock": "Alcohol (3,311 in stock)", "price": "$10"}]
+        store = {"tornhoarder.cityBuys": json.dumps([[now_ms - 1000, 70]])}
+        out = self.run_page({"location": beer, "wallet": 0, "shopItems": items, "store": store})
+        self.assertEqual(out["button"], "Buy 30 × Bottle of Beer · $300")
+        # At the limit the backups' stops are skipped: the run ends here.
+        run = {"stops": [{"label": "a", "url": "u1"}, {"label": "b", "url": "u2"}], "i": 0, "started": now_ms,
+               "name": "Today's buys"}
+        store = {"tornhoarder.cityBuys": json.dumps([[now_ms - 1000, 100]]),
+                 "tornhoarder.restockRun": json.dumps(run)}
+        out = self.run_page({"location": beer, "wallet": 0, "shopItems": items, "store": store, "click": True})
+        self.assertEqual(out["button"], "City shops' 100 a day used ✓ (click to close)")
+        self.assertIsNone(out["run"])
 
 
 class BuyUrlTest(unittest.TestCase):

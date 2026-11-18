@@ -98,12 +98,13 @@ def render_shop_scan(api_key: str) -> None:
             plan_cfg = {**cfg, "Buy": st.column_config.NumberColumn(format="localized")}
             plan_cols = ("Item", "Shop", "Buy", "Buy at", "Sell at", "Profit / unit", "Margin %", "Profit", "Cost", "In stock")
             st.dataframe(buys, width="stretch", hide_index=True, column_config=plan_cfg, column_order=plan_cols)
-            route = plan_route(buys, day_start())
+            route = plan_route(buys, day_start(), spare)
             write_plan(paths.SHOP_PLAN_PATH, route)
             st.markdown("  \n".join(f"[**{s['label']} →**]({s['url']})" for s in route).replace("$", "\\$"))
             st.caption(
                 "Each link opens the shop with the userscript ready to fill the amounts; you click Buy and confirm. "
-                "When the limit resets, the badge on Torn pages offers this plan as one run through every shop."
+                "When the limit resets, the badge on Torn pages offers this plan as one run through every shop, "
+                "then the backups' shops for whatever a sold-out pick left of the day's 100."
             )
             if not spare.empty:
                 st.markdown("**Backups**, if a pick has sold out when you get there:")

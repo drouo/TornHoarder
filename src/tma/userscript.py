@@ -1626,6 +1626,8 @@ TEMPLATE = """\
     // amount and presses its BUY; click 2 confirms. One item per purchase.
     // `daily` (the day's shop plan, &thday=1): only buys since the latest
     // midnight-TCT reset count, so a plan made yesterday works again today.
+    // Never more than what's left of the city shops' 100 a day: the plan's
+    // backups rely on it, and at the limit the run ends.
     function buyMode(spec, checkedSec, daily) {
         var since = (Number(checkedSec) || 0) * 1000;
         if (daily) {
@@ -1645,7 +1647,12 @@ TEMPLATE = """\
         var panel = infoPanel();
         var dock = makeDock(btn, panel);
 
+        function capLeft() {
+            return Math.max(CITY_CAP - cityUsed(), 0);
+        }
+
         function rows() {
+            var cap = capLeft();
             return Object.keys(want).map(function (id) {
                 var input = document.querySelector('input[name="buyAmount[]"][id="' + id + '"]');
                 var nameEl = document.getElementById(id + "-name");
@@ -1656,7 +1663,7 @@ TEMPLATE = """\
                 var left = Math.max(want[id] - boughtSince(id, since), 0);
                 return {
                     id: id, name: nameEl ? nameEl.textContent.trim() : "item " + id, input: input,
-                    stock: stock, price: price, qty: Math.min(left, stock), left: left
+                    stock: stock, price: price, qty: Math.min(left, stock, cap), left: left
                 };
             });
         }
@@ -1681,6 +1688,8 @@ TEMPLATE = """\
                 btn.textContent = "Confirm: buy " + pending.qty + " × " + pending.name + (pending.price ? " · " + fmtMoney(pending.qty * pending.price) : "");
             } else if (next) {
                 btn.textContent = "Buy " + next.qty + " × " + next.name + (next.price ? " · " + fmtMoney(next.qty * next.price) : "");
+            } else if (!capLeft() && all.some(function (r) { return r.left > 0; })) {
+                btn.textContent = "City shops' 100 a day used ✓ (click to close)";
             } else {
                 btn.textContent = all.some(function (r) { return r.left > 0; })
                     ? doneLabel("Nothing left to buy in stock here") : doneLabel("Bought ✓");
@@ -1705,7 +1714,7 @@ TEMPLATE = """\
             }
             var next = rows().filter(function (r) { return r.qty > 0 && r.input; })[0];
             if (!next) {
-                finishStop(dock);
+                finishStop(dock, !capLeft());
                 return;
             }
             var item = document.querySelector('span.item[itemid="' + next.id + '"]');
@@ -1768,9 +1777,10 @@ TEMPLATE = """\
         return base + (nxt ? " · Next: " + nxt.label + " →" : " · " + (r.name || "Restock run") + " done ✓ (click to close)");
     }
 
-    function finishStop(dock) {
+    // `all`: end the whole run here (e.g. the day's city-shop limit is used).
+    function finishStop(dock, all) {
         var r = restockRun();
-        if (!r || r.i + 1 >= r.stops.length) {
+        if (!r || all || r.i + 1 >= r.stops.length) {
             try {
                 localStorage.removeItem(RESTOCK_KEY);
             } catch (e) { /* storage blocked */ }

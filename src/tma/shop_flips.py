@@ -108,16 +108,22 @@ def reset_in_s(now: Optional[float] = None) -> int:
     return day_start(t) + DAY_S - t
 
 
-def plan_route(buys: pd.DataFrame, day: int) -> list[dict]:
-    """The day's buys as run stops, one per shop. Links are stamped with the
-    day's start and marked as daily (thday), so what you bought before the
-    latest reset doesn't count against today, even on a plan from yesterday."""
+def plan_route(buys: pd.DataFrame, day: int, spare: Optional[pd.DataFrame] = None) -> list[dict]:
+    """The day's buys as run stops, one per shop, then the backups as stops of
+    their own, so a pick that has sold out is made up from the backups only
+    after every pick has been tried. The userscript stops buying at the daily
+    limit, so the backups never overbuy. Links are stamped with the day's
+    start and marked as daily (thday), so what you bought before the latest
+    reset doesn't count against today, even on a plan from yesterday."""
     route = []
-    for shop, grp in buys.groupby("Shop", sort=False):
-        url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
-        if url:
-            what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
-            route.append({"label": f"{shop}: {what}", "url": f"{url}&thchk={day}&thday=1"})
+    for df, tag in ((buys, ""), (spare, "backup: ")):
+        if df is None or df.empty:
+            continue
+        for shop, grp in df.groupby("Shop", sort=False):
+            url = buy_url(shop, dict(zip(grp["item_id"], grp["Buy"])))
+            if url:
+                what = ", ".join(f"{int(q)} × {n}" for n, q in zip(grp["Item"], grp["Buy"]))
+                route.append({"label": f"{shop}: {tag}{what}", "url": f"{url}&thchk={day}&thday=1"})
     return route
 
 

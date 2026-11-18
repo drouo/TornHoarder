@@ -38,6 +38,23 @@ class DailyLimitClockTest(unittest.TestCase):
         self.assertIn("thbuy=180:60,294:10", route[0]["url"])
         self.assertTrue(route[0]["url"].endswith(f"&thchk={MIDNIGHT}&thday=1"))
 
+    def test_backups_come_after_every_pick_as_their_own_stops(self):
+        # Live: the plan was 100 × Pepper Spray at Big Al's; it had sold out,
+        # and with no further stop the run ended there.
+        buys = pd.DataFrame([{"Item": "Pepper Spray", "Shop": "Big Al's Gun Shop", "Buy": 100, "item_id": 392}])
+        spare = pd.DataFrame([
+            {"Item": "Beer", "Shop": "Bits 'n' Bobs", "Buy": 100, "item_id": 180},
+            {"Item": "Flash Grenade", "Shop": "Big Al's Gun Shop", "Buy": 40, "item_id": 222},
+        ])
+        route = plan_route(buys, MIDNIGHT, spare)
+        self.assertEqual([s["label"] for s in route], [
+            "Big Al's Gun Shop: 100 × Pepper Spray",
+            "Bits 'n' Bobs: backup: 100 × Beer",
+            "Big Al's Gun Shop: backup: 40 × Flash Grenade",
+        ])
+        self.assertIn("thbuy=180:100&", route[1]["url"])
+        self.assertEqual(plan_route(buys, MIDNIGHT, spare.iloc[0:0]), route[:1])
+
     def test_plan_reaches_the_userscript_through_the_local_server(self):
         with TemporaryDirectory() as d:
             path = Path(d) / "shop_plan.json"

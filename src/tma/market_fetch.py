@@ -63,6 +63,7 @@ def fetch_item_market(
         row[f"damage_{i}"] = stats.get("damage")
         row[f"accuracy_{i}"] = stats.get("accuracy")
         row[f"armor_{i}"] = stats.get("armor")
+        row[f"uid_{i}"] = details.get("uid")
     for i in range(n + 1, MAX_LISTINGS + 1):
         row[f"price_{i}"] = None
         row[f"amount_{i}"] = None
@@ -70,6 +71,7 @@ def fetch_item_market(
         row[f"damage_{i}"] = None
         row[f"accuracy_{i}"] = None
         row[f"armor_{i}"] = None
+        row[f"uid_{i}"] = None
     return row
 
 

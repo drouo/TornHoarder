@@ -2,7 +2,8 @@
 current market: who undercut you, and what to re-price to.
 
 A listing is matched against the market's other listings for the same
-item (one listing at your price is assumed to be yours and left out).
+item; your own listings are taken out of the market first (without_mine),
+so nothing you list or re-price ever undercuts another of yours.
 Weapon/armor copies only compete with copies of equal or better quality.
 """
 
@@ -48,8 +49,44 @@ def drop_listed_copies(entries: list, listed: list[dict]) -> list:
     return [e for e in entries if not (e.uid and str(e.uid) in uids)]
 
 
+LISTING_FIELDS = ("price", "amount", "quality", "damage", "accuracy", "armor", "uid")
+
+
+def without_mine(wide_row: dict, mine: list[dict]) -> dict:
+    """A market_fetch wide row minus your own listings: copies matched by uid,
+    stacks by price and amount (one market listing per listing of yours).
+    Everything priced from the market starts from this, so your listings are
+    never something to undercut."""
+    iid = wide_row.get("item_id")
+    own = [l for l in mine if (l.get("item") or {}).get("id") == iid]
+    if not own:
+        return wide_row
+    uids = {str(l["item"]["uid"]) for l in own if l["item"].get("uid")}
+    stacks = [(float(l["price"]), l.get("amount")) for l in own if not l["item"].get("uid")]
+    kept = []
+    i = 1
+    while f"price_{i}" in wide_row:
+        lst = {f: wide_row.get(f"{f}_{i}") for f in LISTING_FIELDS}
+        i += 1
+        if lst["price"] is None or lst["price"] != lst["price"]:
+            continue
+        if lst["uid"] and str(lst["uid"]) in uids:
+            continue
+        key = (float(lst["price"]), lst["amount"])
+        if not lst["uid"] and key in stacks:
+            stacks.remove(key)
+            continue
+        kept.append(lst)
+    out = {k: v for k, v in wide_row.items() if not any(k.startswith(f + "_") and k[len(f) + 1:].isdigit() for f in LISTING_FIELDS)}
+    for n in range(1, i):
+        lst = kept[n - 1] if n <= len(kept) else {}
+        for f in LISTING_FIELDS:
+            out[f"{f}_{n}"] = lst.get(f)
+    return out
+
+
 def market_listings(wide_row: dict) -> list[dict]:
-    """[{price, amount, quality}] from a market_fetch wide row."""
+    """[{price, amount, quality}] from a market_fetch wide row (see without_mine)."""
     out = []
     i = 1
     while f"price_{i}" in wide_row:
@@ -69,11 +106,7 @@ def review_listing(
     item = mine.get("item") or {}
     price = float(mine["price"])
     quality = ((item.get("stats") or {}).get("quality")) if item.get("uid") else None
-    others = list(market)
-    for i, l in enumerate(others):
-        if l["price"] == price:
-            del others[i]
-            break
+    others = list(market)  # already without your listings (without_mine)
     if item.get("uid"):
         others = [l for l in others if l.get("quality") is not None and quality is not None and l["quality"] >= quality]
     others.sort(key=lambda l: l["price"])

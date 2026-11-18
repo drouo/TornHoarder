@@ -620,6 +620,10 @@ if submitted:
     for err in market_errors:
         st.caption(f"market: {err}")
 
+    # Your own listings never count as the market: nothing is priced or
+    # re-priced against them, so you never undercut yourself.
+    per_id_rows = {iid: row if "error" in row else my_listings.without_mine(row, listed) for iid, row in per_id_rows.items()}
+
     if not per_id_rows:
         run_box.update(label="Market phase failed", state="error")
         st.error("No market data was retrieved.")

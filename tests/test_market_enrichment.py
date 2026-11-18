@@ -177,6 +177,12 @@ class FastSellTest(unittest.TestCase):
         self.assertEqual(s["floor_price"], 800_000.0)
         self.assertEqual(s["fast_sell_price"], 799_999.0)
 
+    def test_many_cheap_listings_are_the_market_not_dumpers(self):
+        # Live: 35 Bo Staffs at ~$2.8k and 35 at $5k; ignoring the cheap half
+        # would list at $4,999, where nothing sells.
+        s = self._summary([2848] * 35 + [5000] * 36, [1] * 71)
+        self.assertEqual(s["fast_sell_price"], 2847.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,14 @@ import pandas as pd
 EXCLUSIVE_TOTAL_UNITS_THRESHOLD = 200.0
 EXCLUSIVE_DOMINANCE_SHARE = 0.50
 EXCLUSIVE_HIGH_FACTOR = 10.0
-LOW_OUTLIER_FACTOR = 0.75  # listings under 3/4 of the clean median aren't the "floor"
+LOW_OUTLIER_FACTOR = 0.75  # listings under 3/4 of the clean median aren't the "floor"...
+DUMPER_SHARE = 0.10  # ...when they're a few (at most 2, or 10% of the listings): many cheap listings ARE the market
+
+
+def few_cheap(n_cheap: int, n_all: int) -> bool:
+    """Whether `n_cheap` listings under the cut are dumpers to ignore rather
+    than the market itself (live: 35 of 70 Bo Staffs at $2.8k, the rest $5k)."""
+    return 0 < n_cheap <= max(2, int(DUMPER_SHARE * n_all))
 
 QUALITY_STEP = 5.0
 MIN_QUALITY_SAMPLES = 5
@@ -215,7 +222,8 @@ def compute_price_suggestions_for_item(df_item: pd.DataFrame) -> dict:
     # catches high outliers; a fat-fingered $1 listing would otherwise drag
     # every undercut down with it, so listings far below the median don't
     # count as the floor.
-    sane = df_clean.loc[df_clean["price"] >= LOW_OUTLIER_FACTOR * fair_price, "price"]
+    low = df_clean["price"] < LOW_OUTLIER_FACTOR * fair_price
+    sane = df_clean.loc[~low, "price"] if few_cheap(int(low.sum()), len(df_clean)) else df_clean["price"]
     floor_price = float(sane.min()) if not sane.empty else float(fair_price)
     fast_sell_price = max(math.floor(floor_price) - 1, 1.0)
 
@@ -368,7 +376,9 @@ def build_stat_payload(df_item: pd.DataFrame) -> dict:
         d = grp.sort_values("price")
         cum = d["quantity"].to_numpy(dtype=float).cumsum()
         ref = float(d["price"].to_numpy(dtype=float)[int(np.argmax(cum > cum[-1] / 2.0))])
-        grp = grp[grp["price"] >= LOW_OUTLIER_FACTOR * ref]
+        low = grp["price"] < LOW_OUTLIER_FACTOR * ref
+        if few_cheap(int(low.sum()), len(grp)):
+            grp = grp[~low]
         # Prices and their quantities must be sorted together, or each price
         # gets another listing's weight.
         by_price = grp.sort_values("price")
